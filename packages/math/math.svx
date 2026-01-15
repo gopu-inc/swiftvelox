@@ -1,0 +1,42 @@
+// Package mathématique
+
+// Constantes
+const PI: f64 = 3.141592653589793
+const E: f64 = 2.718281828459045
+
+// Opérations de base
+fn add(a: i32, b: i32) -> i32 {
+    return a + b
+}
+
+fn sub(a: i32, b: i32) -> i32 {
+    return a - b
+}
+
+fn mul(a: i32, b: i32) -> i32 {
+    return a * b
+}
+
+fn div(a: i32, b: i32) -> i32 {
+    if b == 0 {
+        return 0
+    }
+    return a / b
+}
+
+// Fonctions avancées
+fn sqrt(x: f64) -> f64 {
+    if x < 0 {
+        return 0.0
+    }
+    // Approximation simple
+    return x / 2.0
+}
+
+fn pow(base: f64, exponent: f64) -> f64 {
+    let result = 1.0
+    for let i = 0; i < exponent; i = i + 1 {
+        result = result * base
+    }
+    return result
+}

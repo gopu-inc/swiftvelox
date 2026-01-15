@@ -1,10 +1,16 @@
-// Programme Hello World en SwiftVelox
+// Hello World amélioré
 fn main() {
-    swget("Bonjour SwiftVelox!")
-    swget("Ce langage compile en C pur")
+    swget("🌟 BONJOUR SWIFTVELOX! 🌟")
     
-    let x: i32 = 42
-    let message: string = "Valeur de x: "
+    let nombre = 42
+    let texte = "La réponse universelle est: "
     
-    swget(message + x as string)
+    swget(texte + nombre as string)
+    
+    // Petit calcul
+    let a = 7
+    let b = 6
+    swget("7 * 6 = " + (a * b) as string)
+    
+    swget("✨ Langage compilé natif! ✨")
 }

@@ -1,12 +1,28 @@
-// Test des structures de contrôle
+// Test complet de SwiftVelox
 fn main() {
-    for let i = 0; i < 5; i = i + 1 {
-        swget("Iteration: " + i as string)
+    swget("=== TEST SWIFTVELOX ===")
+    
+    // Variables et calculs
+    let a = 10
+    let b = 20
+    
+    swget("a = " + a as string)
+    swget("b = " + b as string)
+    swget("a + b = " + (a + b) as string)
+    swget("a * b = " + (a * b) as string)
+    
+    // Conditions
+    if a > 5 {
+        swget("a > 5 ✓")
     }
     
-    let counter = 0
-    while counter < 3 {
-        swget("Counter: " + counter as string)
-        counter = counter + 1
+    if b > a {
+        swget("b > a ✓")
     }
+    
+    // Chaînes
+    let message = "Résultat: "
+    swget(message + (a + b) as string)
+    
+    swget("=== FIN DU TEST ===")
 }

@@ -1,15 +1,26 @@
-// Calculatrice simple
+// Calculatrice fonctionnelle
 fn main() {
-    let a = 10
-    let b = 20
+    swget("=== CALCULATRICE ===")
     
-    swget("Addition: " + (a + b) as string)
-    swget("Soustraction: " + (a - b) as string)
-    swget("Multiplication: " + (a * b) as string)
+    let x = 15
+    let y = 3
     
-    if a > b {
-        swget("a est plus grand")
+    swget("x = " + x as string)
+    swget("y = " + y as string)
+    
+    swget("Addition: " + (x + y) as string)
+    swget("Soustraction: " + (x - y) as string)
+    swget("Multiplication: " + (x * y) as string)
+    swget("Division: " + (x / y) as string)
+    
+    // Comparaisons
+    if x > y {
+        swget("x > y ✓")
     } else {
-        swget("b est plus grand ou égal")
+        swget("x <= y")
+    }
+    
+    if x == 15 {
+        swget("x == 15 ✓")
     }
 }

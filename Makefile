@@ -1,17 +1,20 @@
-# Makefile simple pour SwiftVelox
-CC = cc
-CFLAGS = -Os -s -static -Wall
+CC = gcc
+CFLAGS = -O2 -Wall -Wextra
 TARGET = swiftvelox
 
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(TARGET)
 
-$(TARGET): src/main.c src/compiler.c src/runtime.c
-	$(CC) $(CFLAGS) -o $(TARGET) src/main.c src/compiler.c src/runtime.c
+$(TARGET): src/main.c
+	$(CC) $(CFLAGS) -o $(TARGET) src/main.c
 
 clean:
-	rm -f $(TARGET) *.o examples/*.out
+	rm -f $(TARGET) *.o *.out *.c examples/*.out examples/*.c
 
 test: $(TARGET)
-	./$(TARGET) examples/hello.svx
+	./$(TARGET) run examples/test.svx
+	./$(TARGET) run examples/calc.svx
+
+quick:
+	gcc -O2 -o swiftvelox src/main.c

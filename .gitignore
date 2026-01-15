@@ -1,0 +1,25 @@
+# Exécutables
+swiftvelox
+*.out
+*.o
+*.so
+*.a
+
+# Fichiers générés
+*.c
+!src/*.c
+
+# Dossiers de build
+build/
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Système
+.DS_Store
+Thumbs.db

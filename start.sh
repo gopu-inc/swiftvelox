@@ -1,17 +1,14 @@
 #!/bin/sh
-echo "=== SwiftVelox Compiler ==="
-echo "Compilation du compilateur..."
+echo "=== SwiftVelox ==="
+echo "Compilation..."
 make
 
-if [ $? -eq 0 ]; then
+if [ -f "./svc" ]; then
+    echo "✅ Compilateur créé: ./svc"
     echo ""
-    echo "✅ Compilateur créé: ./swiftvelox"
-    echo ""
-    echo "Usage:"
-    echo "  ./swiftvelox build examples/hello.svx"
-    echo "  ./swiftvelox run examples/hello.svx"
-    echo "  ./swiftvelox version"
+    echo "Test:"
+    ./svc run examples/test.svx
 else
-    echo "❌ Erreur de compilation"
+    echo "❌ Erreur"
     exit 1
 fi

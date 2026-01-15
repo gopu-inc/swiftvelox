@@ -1,0 +1,21 @@
+// Package standard SwiftVelox
+// Fonctions de base
+
+// Affichage
+fn print(msg: string) {
+    // À implémenter
+}
+
+// Conversion
+fn int_to_string(n: i32) -> string {
+    return n as string
+}
+
+fn string_to_int(s: string) -> i32 {
+    return 0
+}
+
+// Utilitaires
+fn len(s: string) -> i32 {
+    return 0
+}
