@@ -18,7 +18,7 @@
 
 // ===== CONFIGURATION =====
 #define VERSION "2.0.0"
-#define LIB_PATH "/usr/bin/swiftvelox/addws/"
+#define LIB_PATH "/usr/local/lib/swiftvelox/addws/"
 #define MAX_LINE_LENGTH 4096
 
 // ===== TYPES DE DONNÉES =====
