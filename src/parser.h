@@ -1,24 +1,16 @@
 #ifndef PARSER_H
 #define PARSER_H
 
-#include "lexer.h"
+#include "common.h"
 #include "value.h"
 
 typedef struct ASTNode {
-    NodeType type;
-    Token token;
-    struct ASTNode* left;
-    struct ASTNode* right;
-    struct ASTNode** children;
-    int child_count;
-    ValueType inferred_type;
+    int type;  // Pour l'instant, simple placeholder
+    void* data;
 } ASTNode;
 
-// Fonctions du parser
+// Fonctions de parsing (stubs pour l'instant)
 ASTNode* parse(const char* source);
-ASTNode* new_node(NodeType type);
-ASTNode* expression();
-ASTNode* statement();
-ASTNode* declaration();
+Value eval(ASTNode* node, Environment* env);
 
 #endif
