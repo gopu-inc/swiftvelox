@@ -1,0 +1,50 @@
+// Test des fonctionnalités de base
+print("✨ Bienvenue dans SwiftVelox!");
+
+// Variables et opérations
+let a = 10;
+let b = 5;
+let sum = a + b;
+let diff = a - b;
+let prod = a * b;
+let quot = a / b;
+
+print("a =", a, "b =", b);
+print("a + b =", sum);
+print("a - b =", diff);
+print("a * b =", prod);
+print("a / b =", quot);
+
+// Conditions
+if (a > b) {
+    print("a est plus grand que b");
+} else {
+    print("a n'est pas plus grand que b");
+}
+
+// Boucles
+let i = 1;
+while (i <= 5) {
+    print("Compteur:", i);
+    i = i + 1;
+}
+
+// Fonctions
+fn add(x, y) {
+    return x + y;
+}
+
+let result = add(7, 3);
+print("7 + 3 =", result);
+
+// Booléens
+let is_true = true;
+let is_false = false;
+print("true =", is_true, "false =", is_false);
+
+// Comparaisons
+print("10 > 5 =", 10 > 5);
+print("10 == 10 =", 10 == 10);
+print("10 != 5 =", 10 != 5);
+
+print("✅ Tous les tests passés!");
