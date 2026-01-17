@@ -1,52 +1,31 @@
-// test_simple.svx
-// Test simple pour vérifier les fonctionnalités de base
+// test_basic.svx
+// Test très basique - syntaxe minimale
 
-print("=== Test simple SwiftVelox ===");
+// Test 1: Simple variable
+let a = 5;
+print(a);
 
-// Test 1: Variables et print
-let a = 10;
-let b = 5;
-print("a =", a, "b =", b);
-print("a + b =", a + b);
+// Test 2: Addition
+let b = 3;
+let c = a + b;
+print(c);
 
-// Test 2: Chaînes
-let nom = "Monde";
-print("Bonjour " + nom);
+// Test 3: String
+let nom = "test";
+print(nom);
 
-// Test 3: Booléens
-print("true:", true);
-print("false:", false);
-print("5 == 5:", 5 == 5);
-print("5 == 6:", 5 == 6);
+// Test 4: Boolean
+let vrai = true;
+print(vrai);
 
-// Test 4: If/else
-if (a > b) {
-    print("a est plus grand que b");
-} else {
-    print("a n'est pas plus grand que b");
+// Test 5: Simple if
+if (true) {
+    print("if works");
 }
 
-// Test 5: While
-let i = 1;
-print("Compte de 1 à 3:");
-while (i <= 3) {
-    print("i =", i);
+// Test 6: While loop
+let i = 0;
+while (i < 3) {
+    print(i);
     i = i + 1;
 }
-
-// Test 6: Fonction simple
-fn saluer() {
-    print("Bonjour depuis une fonction!");
-}
-saluer();
-
-// Test 7: Fonction avec paramètres
-fn multiplier(x, y) {
-    return x * y;
-}
-print("multiplier(3, 4) =", multiplier(3, 4));
-
-// Test 8: Fonction native
-print("Temps actuel:", time());
-
-print("=== Fin des tests ===");
