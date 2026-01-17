@@ -1,0 +1,3 @@
+fn main() {
+    swget("Hello from Native SwiftVelox!")
+}
