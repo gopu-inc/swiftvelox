@@ -1,36 +1,76 @@
-CC = gcc
-CFLAGS = -std=c99 -Wall -Wextra -O2 -I./src -D_POSIX_C_SOURCE=200809L
-LIBS = -lm -lpthread -lcurl -lsqlite3
-SRC_DIR = src
-OBJ_DIR = obj
+COMPILER_DIR = src/compiler/
+RUNTIME_DIR = src/runtime/
+SHARED_DIR = src/shared/
+UTILS_DIR = src/utils/
+OPT_DIR = src/optionals/
+GRAVITY_SRC = src/cli/gravity.c
+EXAMPLE_SRC = examples/example.c
 
-# Liste tous les fichiers source
-SRCS = $(SRC_DIR)/main.c \
-       $(SRC_DIR)/value.c \
-       $(SRC_DIR)/interpreter.c \
-       $(SRC_DIR)/native.c \
-       $(SRC_DIR)/parser.c \
-       $(SRC_DIR)/lexer.c
+CC ?= gcc
+SRC = $(wildcard $(COMPILER_DIR)*.c) \
+      $(wildcard $(RUNTIME_DIR)*.c) \
+      $(wildcard $(SHARED_DIR)*.c) \
+      $(wildcard $(UTILS_DIR)*.c) \
+      $(wildcard $(OPT_DIR)*.c)
 
-OBJS = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
+INCLUDE = -I$(COMPILER_DIR) -I$(RUNTIME_DIR) -I$(SHARED_DIR) -I$(UTILS_DIR) -I$(OPT_DIR)
+CFLAGS = $(INCLUDE) -std=gnu99 -fgnu89-inline -fPIC -DBUILD_GRAVITY_API -MMD
+OBJ = $(SRC:.c=.o)
+DEP = $(OBJ:.o=.d)
+	
+ifeq ($(OS),Windows_NT)
+	# Windows
+	LIBTARGET = gravity.dll
+	LDFLAGS = -lm -lShlwapi
+else
+	UNAME_S := $(shell uname -s)
+	ifeq ($(UNAME_S),Darwin)
+		# MacOS
+		LIBTARGET = libgravity.dylib
+		LDFLAGS = -lm
+	else ifeq ($(UNAME_S),OpenBSD)
+		# OpenBSD
+		LIBTARGET = libgravity.so
+		LDFLAGS = -lm
+	else ifeq ($(UNAME_S),FreeBSD)
+		# FreeBSD
+		LIBTARGET = libgravity.so
+		LDFLAGS = -lm
+	else ifeq ($(UNAME_S),NetBSD)
+		# NetBSD
+		LIBTARGET = libgravity.so
+		LDFLAGS = -lm
+	else ifeq ($(UNAME_S),DragonFly)
+		# DragonFly
+		LIBTARGET = libgravity.so
+		LDFLAGS = -lm
+	else
+		# Linux
+		LIBTARGET = libgravity.so
+		LDFLAGS = -lm -lrt
+	endif
+endif
 
-TARGET = swiftvelox
+ifeq ($(mode),debug)
+	CFLAGS += -g -O0 -DDEBUG
+else
+	CFLAGS += -O2
+endif
 
-all: $(TARGET)
+all: gravity
 
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
+gravity:	$(OBJ) $(GRAVITY_SRC)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	
+example:	$(OBJ) $(EXAMPLE_SRC)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(OBJ_DIR):
-	mkdir -p $(OBJ_DIR)
+lib: gravity
+	$(CC) -shared -o $(LIBTARGET) $(OBJ) $(LDFLAGS)
 
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET)
+	rm -f $(OBJ) $(DEP) gravity example libgravity.so gravity.dll
 
-run: $(TARGET)
-	./$(TARGET)
+.PHONY: all clean gravity example
 
-.PHONY: all clean run
+-include $(DEP)
