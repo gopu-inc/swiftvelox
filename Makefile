@@ -1,13 +1,19 @@
 CC = gcc
-CFLAGS = -std=c99 -Wall -Wextra -O2 -I./src
+CFLAGS = -std=c99 -Wall -Wextra -O2 -I./src -D_POSIX_C_SOURCE=200809L
 LIBS = -lm -lpthread -lcurl -lsqlite3
 SRC_DIR = src
 OBJ_DIR = obj
 
-SRCS = $(SRC_DIR)/main.c
+# Liste tous les fichiers source
+SRCS = $(SRC_DIR)/main.c \
+       $(SRC_DIR)/value.c \
+       $(SRC_DIR)/interpreter.c \
+       $(SRC_DIR)/native.c \
+       $(SRC_DIR)/parser.c
+
 OBJS = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
-TARGET = swift
+TARGET = swft
 
 all: $(TARGET)
 
@@ -23,10 +29,7 @@ $(OBJ_DIR):
 clean:
 	rm -rf $(OBJ_DIR) $(TARGET)
 
-test:
-	./$(TARGET) test
+run: $(TARGET)
+	./$(TARGET)
 
-repl:
-	./$(TARGET) repl
-
-.PHONY: all clean test repl
+.PHONY: all clean run
