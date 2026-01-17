@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
         printf("📦 Exécution de %s...\n", argv[2]);
         
         ASTNode* program = parse(source);
-        Value result = eval(program, global_env);
+        eval(program, global_env);  // Retiré la variable result inutilisée
         
         free(source);
         printf("✅ Exécution terminée\n");
@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
         source[size] = '\0';
         
         // Simple formatting: just re-parse and pretty print
-        printf("✅ Formaté: %s (formatage basique)\n", argv[2]);
+        printf("[SUCCES] Formaté: %s (formatage basique)\n", argv[2]);
         
         free(source);
         return 0;
