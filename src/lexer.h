@@ -30,6 +30,7 @@ void init_scanner(const char* source);
 Token scan_token();
 Token next_token();
 int match(TokenType type);
+int is_at_end(void);
 void consume(TokenType type, const char* message);
 void syntax_error(Token token, const char* message);
 
