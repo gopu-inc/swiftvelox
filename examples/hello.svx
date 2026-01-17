@@ -1,16 +1,49 @@
-// Hello World amélioré
-fn main() {
-    swget("🌟 BONJOUR SWIFTVELOX! 🌟")
-    
-    let nombre = 42
-    let texte = "La réponse universelle est: "
-    
-    swget(texte + nombre as string)
-    
-    // Petit calcul
-    let a = 7
-    let b = 6
-    swget("7 * 6 = " + (a * b) as string)
-    
-    swget("✨ Langage compilé natif! ✨")
+// Exemple de programme SwiftVelox
+
+print("✨ Bienvenue dans SwiftVelox!");
+
+// Variables
+let name = "Mauricio";
+let age = 25;
+print("Nom:", name, "Âge:", age);
+
+// Fonctions
+fn greet(person) {
+    return "Bonjour " + person + "!";
 }
+
+print(greet("Monde"));
+
+// Conditions
+if age >= 18 {
+    print("Vous êtes majeur");
+} else {
+    print("Vous êtes mineur");
+}
+
+// Boucles
+print("Comptage:");
+let i = 1;
+while i <= 5 {
+    print(i);
+    i = i + 1;
+}
+
+// Tableaux
+let fruits = ["pomme", "banane", "orange"];
+print("Fruits:", fruits);
+
+// Objets
+let person = {
+    name: "Alice",
+    age: 30,
+    city: "Paris"
+};
+print("Personne:", person);
+
+// Test des fonctions natives
+print("Type de name:", typeof(name));
+print("Longueur de name:", length(name));
+print("Racine carrée de 16:", math.sqrt(16));
+
+print("✅ Programme terminé avec succès!");
