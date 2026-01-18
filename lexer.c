@@ -289,8 +289,15 @@ static Token identifier() {
             free(text);
             return makeToken(TK_TYPE_BOOL);
         }
+        if (strcmp(text, "from") == 0) {
+            free(text);
+            // "from" est traité comme un identifiant spécial
+            Token token = makeToken(TK_IDENT);
+            token.value.str_val = str_copy("from");
+            return token;
+        }
         
-        // If not a keyword, it's an identifier
+        // Si not a keyword, it's an identifier
         Token token = makeToken(TK_IDENT);
         token.value.str_val = text;
         return token;
