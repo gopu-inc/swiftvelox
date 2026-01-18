@@ -9,55 +9,13 @@
 extern ASTNode** parse(const char* source, int* count);
 
 // ======================================================
-// [SECTION] JSON VALUE MANAGEMENT
-// ======================================================
-static JsonValue* json_new_value(JsonType type) {
-    JsonValue* val = calloc(1, sizeof(JsonValue));
-    if (val) val->type = type;
-    return val;
-}
-
-static void json_free_value(JsonValue* val) {
-    if (!val) return;
-    
-    switch (val->type) {
-        case JSON_STRING:
-            if (val->data.str_val) free(val->data.str_val);
-            break;
-        case JSON_OBJECT:
-            if (val->data.obj.pairs) {
-                JsonPair* pair = val->data.obj.pairs;
-                while (pair) {
-                    JsonPair* next = pair->next;
-                    free(pair->key);
-                    json_free_value(pair->value);
-                    free(pair);
-                    pair = next;
-                }
-            }
-            break;
-        case JSON_ARRAY:
-            if (val->data.arr.values) {
-                for (int i = 0; i < val->data.arr.count; i++) {
-                    json_free_value(&val->data.arr.values[i]);
-                }
-                free(val->data.arr.values);
-            }
-            break;
-        default:
-            break;
-    }
-    free(val);
-}
-
-// ======================================================
 // [SECTION] VARIABLE SYSTEM WITH SCOPE
 // ======================================================
 typedef enum {
-    VAR_VAR,     // mutable
-    VAR_NIP,     // immutable (set once)
-    VAR_SIM,     // simple (constant-like)
-    VAR_NUUM     // number only
+    VAR_VAR,
+    VAR_NIP,
+    VAR_SIM,
+    VAR_NUUM
 } VarType;
 
 typedef struct Variable {
@@ -69,7 +27,7 @@ typedef struct Variable {
         char* str_val;
         char char_val;
         bool bool_val;
-        JsonValue* json_val;
+        void* json_val;
     } value;
     char type_name[50];
     bool is_set;
@@ -88,7 +46,6 @@ typedef struct {
     char* import_path;
     char* current_package;
     
-    // Function call stack
     Scope** stack;
     int stack_size;
     int stack_capacity;
@@ -113,14 +70,8 @@ static void scope_free(Scope* scope) {
     if (!scope) return;
     
     for (int i = 0; i < scope->count; i++) {
-        if (scope->vars[i].type_name[0]) {
-            // Free JSON values if needed
-            if (strcmp(scope->vars[i].type_name, "json") == 0 && 
-                scope->vars[i].value.json_val) {
-                json_free_value(scope->vars[i].value.json_val);
-            } else if (scope->vars[i].value.str_val) {
-                free(scope->vars[i].value.str_val);
-            }
+        if (strcmp(scope->vars[i].type_name, "string") == 0 && scope->vars[i].value.str_val) {
+            free(scope->vars[i].value.str_val);
         }
     }
     
@@ -137,7 +88,6 @@ static void vm_init() {
         vm.stack = malloc(vm.stack_capacity * sizeof(Scope*));
         vm.stack_size = 0;
         
-        // Push global scope
         vm.stack[vm.stack_size++] = vm.global_scope;
     }
 }
@@ -180,15 +130,13 @@ static Variable* find_variable(const char* name) {
 static Variable* create_variable(const char* name, VarType type) {
     Scope* scope = vm.current_scope;
     
-    // Check if variable already exists in current scope
     for (int i = 0; i < scope->count; i++) {
         if (strcmp(scope->vars[i].name, name) == 0) {
-            printf(RED "[ERROR]" RESET " Variable '%s' already exists in this scope\n", name);
+            printf(RED "[ERROR]" RESET " Variable '%s' already exists\n", name);
             return NULL;
         }
     }
     
-    // Resize if needed
     if (scope->count >= scope->capacity) {
         scope->capacity *= 2;
         scope->vars = realloc(scope->vars, scope->capacity * sizeof(Variable));
@@ -201,23 +149,11 @@ static Variable* create_variable(const char* name, VarType type) {
     var->is_set = false;
     var->type_name[0] = '\0';
     
-    // Initialize based on type
-    switch (type) {
-        case VAR_VAR:
-        case VAR_NIP:
-        case VAR_SIM:
-            var->value.int_val = 0;
-            break;
-        case VAR_NUUM:
-            var->value.float_val = 0.0;
-            break;
-    }
-    
     return var;
 }
 
 // ======================================================
-// [SECTION] GLOBAL VARIABLES & PACKAGES
+// [SECTION] PACKAGE SYSTEM
 // ======================================================
 typedef struct {
     char name[100];
@@ -245,25 +181,6 @@ typedef struct {
 
 static Package packages[20];
 static int package_count = 0;
-
-static void set_global_var(const char* name, float value, bool is_float, const char* module) {
-    for (int i = 0; i < global_var_count; i++) {
-        if (strcmp(global_vars[i].name, name) == 0) {
-            global_vars[i].value.float_val = value;
-            global_vars[i].is_float = is_float;
-            return;
-        }
-    }
-    
-    if (global_var_count < 500) {
-        GlobalVariable* gv = &global_vars[global_var_count++];
-        strncpy(gv->name, name, 99);
-        gv->name[99] = '\0';
-        gv->value.float_val = value;
-        gv->is_float = is_float;
-        gv->module = module ? str_copy(module) : NULL;
-    }
-}
 
 static void register_package_export(const char* package_name, const char* alias, const char* module_path) {
     int pkg_idx = -1;
@@ -316,24 +233,6 @@ static void set_current_package(const char* package) {
     vm.current_package = my_strdup(package);
 }
 
-static char* resolve_package_export(const char* alias, const char* package_name) {
-    for (int i = 0; i < package_count; i++) {
-        if (strcmp(packages[i].name, package_name) == 0) {
-            for (int j = 0; j < packages[i].export_count; j++) {
-                if (strcmp(packages[i].exports[j].alias, alias) == 0) {
-                    char* full_path = malloc(strlen("/usr/local/lib/swift/") + 
-                                            strlen(package_name) + 
-                                            strlen(packages[i].exports[j].module_path) + 10);
-                    sprintf(full_path, "/usr/local/lib/swift/%s/%s", 
-                            package_name, packages[i].exports[j].module_path);
-                    return full_path;
-                }
-            }
-        }
-    }
-    return NULL;
-}
-
 static char* find_import_file(const char* module, const char* from_package) {
     if (module[0] == '.' || module[0] == '/') {
         if (module[0] == '.' && vm.current_package) {
@@ -352,11 +251,6 @@ static char* find_import_file(const char* module, const char* from_package) {
             return full_path;
         }
         return my_strdup(module);
-    }
-    
-    if (from_package) {
-        char* resolved = resolve_package_export(module, from_package);
-        if (resolved) return resolved;
     }
     
     const char* base_path = "/usr/local/lib/swift/";
@@ -459,47 +353,6 @@ static void import_module(const char* module, const char* from_package) {
 // ======================================================
 // [SECTION] EXPRESSION EVALUATION
 // ======================================================
-static float eval_float(ASTNode* node);
-static int64_t eval_int(ASTNode* node);
-static char* eval_string(ASTNode* node);
-
-static float eval_float(ASTNode* node) {
-    if (!node) return 0.0f;
-    
-    switch (node->type) {
-        case NODE_INT:
-            return (float)node->data.int_val;
-        case NODE_FLOAT:
-            return (float)node->data.float_val;
-        case NODE_IDENT: {
-            Variable* var = find_variable(node->data.name);
-            if (var) {
-                if (strcmp(var->type_name, "float") == 0) {
-                    return var->value.float_val;
-                } else if (strcmp(var->type_name, "int") == 0) {
-                    return (float)var->value.int_val;
-                }
-            }
-            printf(RED "[ERROR]" RESET " Undefined variable: %s\n", node->data.name);
-            return 0.0f;
-        }
-        case NODE_BINARY: {
-            float left = eval_float(node->left);
-            float right = eval_float(node->right);
-            
-            switch ((TokenKind)node->data.int_val) {
-                case TK_PLUS: return left + right;
-                case TK_MINUS: return left - right;
-                case TK_MULT: return left * right;
-                case TK_DIV: return right != 0 ? left / right : 0;
-                default: return 0.0f;
-            }
-        }
-        default:
-            return 0.0f;
-    }
-}
-
 static int64_t eval_int(ASTNode* node) {
     if (!node) return 0;
     
@@ -546,6 +399,42 @@ static int64_t eval_int(ASTNode* node) {
     }
 }
 
+static double eval_float(ASTNode* node) {
+    if (!node) return 0.0;
+    
+    switch (node->type) {
+        case NODE_INT:
+            return (double)node->data.int_val;
+        case NODE_FLOAT:
+            return node->data.float_val;
+        case NODE_IDENT: {
+            Variable* var = find_variable(node->data.name);
+            if (var) {
+                if (strcmp(var->type_name, "float") == 0) {
+                    return var->value.float_val;
+                } else if (strcmp(var->type_name, "int") == 0) {
+                    return (double)var->value.int_val;
+                }
+            }
+            return 0.0;
+        }
+        case NODE_BINARY: {
+            double left = eval_float(node->left);
+            double right = eval_float(node->right);
+            
+            switch ((TokenKind)node->data.int_val) {
+                case TK_PLUS: return left + right;
+                case TK_MINUS: return left - right;
+                case TK_MULT: return left * right;
+                case TK_DIV: return right != 0.0 ? left / right : 0.0;
+                default: return 0.0;
+            }
+        }
+        default:
+            return 0.0;
+    }
+}
+
 static char* eval_string(ASTNode* node) {
     if (!node) return str_copy("");
     
@@ -568,7 +457,6 @@ static char* eval_string(ASTNode* node) {
             return str;
         }
         default: {
-            // Convert other types to string
             char buffer[100];
             if (node->type == NODE_INT) {
                 snprintf(buffer, sizeof(buffer), "%lld", eval_int(node));
@@ -595,7 +483,6 @@ static void execute_var_decl(ASTNode* node, VarType var_type) {
     Variable* var = create_variable(node->data.name, var_type);
     if (!var) return;
     
-    // Determine type from initial value
     if (node->left) {
         switch (node->left->type) {
             case NODE_INT:
@@ -625,7 +512,6 @@ static void execute_var_decl(ASTNode* node, VarType var_type) {
         var->is_set = true;
     }
     
-    // For nip variables in packages, register as export
     if (vm.current_package && var_type == VAR_NIP && node->left && 
         node->left->type == NODE_STRING) {
         register_package_export(vm.current_package, node->data.name, 
@@ -644,7 +530,6 @@ static void execute_print(ASTNode* node) {
         }
     }
     
-    // Handle multiple arguments
     if (node->right && node->right->type == NODE_PRINT) {
         printf(" ");
         execute_print(node->right);
@@ -662,7 +547,6 @@ static void execute_assignment(ASTNode* node) {
         return;
     }
     
-    // Check variable type restrictions
     if (var->type == VAR_NIP && var->is_set) {
         printf(RED "[ERROR]" RESET " Variable '%s' is immutable (nip)\n", node->data.name);
         return;
@@ -695,7 +579,7 @@ static void execute_assignment(ASTNode* node) {
 static void execute_sizeof(ASTNode* node) {
     if (!node) return;
     
-    if (node->data.size_op.expr) {
+    if (node->data.size_op.expr && node->data.size_op.expr->type == NODE_IDENT) {
         Variable* var = find_variable(node->data.size_op.expr->data.name);
         if (var) {
             int size = 0;
@@ -714,8 +598,7 @@ static void execute_sizeof(ASTNode* node) {
 static void execute_zis(ASTNode* node) {
     if (!node) return;
     
-    if (node->data.size_op.expr) {
-        // Similar to sizeof but returns memory size
+    if (node->data.size_op.expr && node->data.size_op.expr->type == NODE_IDENT) {
         Variable* var = find_variable(node->data.size_op.expr->data.name);
         if (var) {
             int size = 0;
@@ -739,7 +622,6 @@ static void execute_if(ASTNode* node) {
         if (cond != 0) {
             if (node->right) execute(node->right);
         } else if (node->right && node->right->type == NODE_BLOCK) {
-            // Has else block
             if (node->right->right) execute(node->right->right);
         }
     }
@@ -756,16 +638,12 @@ static void execute_while(ASTNode* node) {
 static void execute_for(ASTNode* node) {
     if (!node) return;
     
-    // Execute init if exists
     if (node->left) execute(node->left);
     
-    // Loop while condition is true
     while (node->data.func.body && node->data.func.body->left && 
            eval_int(node->data.func.body->left) != 0) {
-        // Execute body
         if (node->right) execute(node->right);
         
-        // Execute increment
         if (node->data.func.body && node->data.func.body->right) {
             execute(node->data.func.body->right);
         }
@@ -843,15 +721,13 @@ static void execute(ASTNode* node) {
             printf("[FUNC] Defined: %s\n", node->data.func.name);
             break;
         case NODE_RETURN:
-            // Return handling simplified
             if (node->left) {
-                printf("[RETURN] Value: ");
+                printf("[RETURN] ");
                 if (node->left->type == NODE_INT) printf("%lld\n", node->left->data.int_val);
                 else if (node->left->type == NODE_FLOAT) printf("%f\n", node->left->data.float_val);
             }
             break;
         default:
-            // Expression statement
             break;
     }
 }
@@ -872,7 +748,6 @@ static void run(const char* source, const char* filename) {
             }
         }
         
-        // Cleanup
         for (int i = 0; i < count; i++) {
             if (nodes[i]) {
                 if (nodes[i]->type == NODE_IMPORT) {
@@ -895,12 +770,6 @@ static void run(const char* source, const char* filename) {
                 if (nodes[i]->type == NODE_STRING) {
                     free(nodes[i]->data.str_val);
                 }
-                if (nodes[i]->type == NODE_FUNC && nodes[i]->data.func.body) {
-                    free(nodes[i]->data.func.body);
-                }
-                if (nodes[i]->type == NODE_CLASS && nodes[i]->data.class.fields) {
-                    free(nodes[i]->data.class.fields);
-                }
                 free(nodes[i]);
             }
         }
@@ -913,7 +782,7 @@ static void run(const char* source, const char* filename) {
 // ======================================================
 static void repl() {
     printf(GREEN "SwiftFlow" RESET " v2.0 Extended\n");
-    printf("Types: var, nip(immutable), sim(simple), nuum(number)\n");
+    printf("Variables: var, nip(immutable), sim(simple), nuum(number)\n");
     printf("Type 'exit' to quit\n\n");
     
     set_import_path("./");
@@ -930,20 +799,8 @@ static void repl() {
         run(line, "REPL");
     }
     
-    // Cleanup
     if (vm.import_path) free(vm.import_path);
     if (vm.current_package) free(vm.current_package);
-    
-    for (int i = 0; i < global_var_count; i++) {
-        if (global_vars[i].module) free(global_vars[i].module);
-    }
-    
-    if (vm.stack) {
-        for (int i = 0; i < vm.stack_size; i++) {
-            scope_free(vm.stack[i]);
-        }
-        free(vm.stack);
-    }
 }
 
 // ======================================================
@@ -984,20 +841,8 @@ int main(int argc, char* argv[]) {
         run(source, argv[1]);
         free(source);
         
-        // Cleanup
         if (vm.import_path) free(vm.import_path);
         if (vm.current_package) free(vm.current_package);
-        
-        for (int i = 0; i < global_var_count; i++) {
-            if (global_vars[i].module) free(global_vars[i].module);
-        }
-        
-        if (vm.stack) {
-            for (int i = 0; i < vm.stack_size; i++) {
-                scope_free(vm.stack[i]);
-            }
-            free(vm.stack);
-        }
     }
     
     return 0;
