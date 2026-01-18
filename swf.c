@@ -23,9 +23,82 @@ typedef struct {
     Variable vars[100];
     int count;
     char* import_path;
+    char* current_package;
 } VM;
 
 static VM vm = {0};
+
+// ======================================================
+// [SECTION] PACKAGE EXPORT SYSTEM
+// ======================================================
+typedef struct {
+    char alias[50];
+    char module_path[100];
+} PackageExport;
+
+typedef struct {
+    char name[50];
+    PackageExport exports[20];
+    int export_count;
+} Package;
+
+static Package packages[20];
+static int package_count = 0;
+
+static void registerPackageExport(const char* package_name, const char* alias, const char* module_path) {
+    // Trouver ou créer le package
+    int pkg_idx = -1;
+    for (int i = 0; i < package_count; i++) {
+        if (strcmp(packages[i].name, package_name) == 0) {
+            pkg_idx = i;
+            break;
+        }
+    }
+    
+    if (pkg_idx == -1) {
+        // Créer un nouveau package
+        if (package_count < 20) {
+            pkg_idx = package_count++;
+            strncpy(packages[pkg_idx].name, package_name, 49);
+            packages[pkg_idx].name[49] = '\0';
+            packages[pkg_idx].export_count = 0;
+        } else {
+            printf(RED "[ERROR]" RESET " Too many packages\n");
+            return;
+        }
+    }
+    
+    // Ajouter l'export
+    if (packages[pkg_idx].export_count < 20) {
+        PackageExport* exp = &packages[pkg_idx].exports[packages[pkg_idx].export_count++];
+        strncpy(exp->alias, alias, 49);
+        exp->alias[49] = '\0';
+        strncpy(exp->module_path, module_path, 99);
+        exp->module_path[99] = '\0';
+        
+        printf(CYAN "[PACKAGE]" RESET " %s exports '%s' as '%s'\n", 
+               package_name, module_path, alias);
+    }
+}
+
+static char* resolvePackageExport(const char* alias, const char* package_name) {
+    for (int i = 0; i < package_count; i++) {
+        if (strcmp(packages[i].name, package_name) == 0) {
+            for (int j = 0; j < packages[i].export_count; j++) {
+                if (strcmp(packages[i].exports[j].alias, alias) == 0) {
+                    // Construire le chemin complet
+                    char* full_path = malloc(strlen("/usr/local/lib/swift/") + 
+                                            strlen(package_name) + 
+                                            strlen(packages[i].exports[j].module_path) + 10);
+                    sprintf(full_path, "/usr/local/lib/swift/%s/%s", 
+                            package_name, packages[i].exports[j].module_path);
+                    return full_path;
+                }
+            }
+        }
+    }
+    return NULL;
+}
 
 // ======================================================
 // [SECTION] HELPER FUNCTIONS
@@ -43,18 +116,31 @@ static void setImportPath(const char* path) {
     vm.import_path = my_strdup(path);
 }
 
-static char* findImportFile(const char* module, const char* from_module) {
-    // Si chemin direct
+static void setCurrentPackage(const char* package) {
+    if (vm.current_package) free(vm.current_package);
+    vm.current_package = my_strdup(package);
+}
+
+static char* findImportFile(const char* module, const char* from_package) {
+    // 1. Si chemin direct
     if (module[0] == '.' || module[0] == '/') {
         return my_strdup(module);
     }
     
-    // Déterminer le chemin de base
+    // 2. Si from_package est spécifié, essayer de résoudre l'export
+    if (from_package) {
+        char* resolved = resolvePackageExport(module, from_package);
+        if (resolved) {
+            printf(CYAN "[PACKAGE]" RESET " Resolved %s -> %s from package %s\n", 
+                   module, resolved, from_package);
+            return resolved;
+        }
+    }
+    
+    // 3. Déterminer le chemin de base
     const char* base_path = "/usr/local/lib/swift/";
     
-    // ============================================
-    // 1. D'ABORD CHERCHER COMME PACKAGE (DOSSIER)
-    // ============================================
+    // 4. Chercher comme package (dossier)
     char* package_dir = malloc(strlen(base_path) + strlen(module) + 2);
     sprintf(package_dir, "%s%s/", base_path, module);
     
@@ -65,17 +151,15 @@ static char* findImportFile(const char* module, const char* from_module) {
         sprintf(svlib_path, "%s%s.svlib", package_dir, module);
         
         if (access(svlib_path, F_OK) == 0) {
-            printf(CYAN "[PACKAGE]" RESET " Found package: %s\n", module);
             free(package_dir);
+            printf(CYAN "[PACKAGE]" RESET " Found package: %s\n", module);
             return svlib_path;
         }
         free(svlib_path);
     }
     free(package_dir);
     
-    // ============================================
-    // 2. SINON CHERCHER COMME FICHIER SIMPLE
-    // ============================================
+    // 5. Chercher comme fichier simple
     char* path = malloc(strlen(base_path) + strlen(module) + 10);
     
     // Essayer avec .swf
@@ -94,13 +178,15 @@ static char* findImportFile(const char* module, const char* from_module) {
     return NULL;
 }
 
-static void importModule(const char* module, const char* from_module);
+static void importModule(const char* module, const char* from_package);
 static void run(const char* source, const char* filename);
 
-static void importModule(const char* module, const char* from_module) {
-    printf(YELLOW "[IMPORT]" RESET " Loading: %s\n", module);
+static void importModule(const char* module, const char* from_package) {
+    printf(YELLOW "[IMPORT]" RESET " Loading: %s", module);
+    if (from_package) printf(" from package: %s", from_package);
+    printf("\n");
     
-    char* path = findImportFile(module, from_module ? my_strdup(from_module) : NULL);
+    char* path = findImportFile(module, from_package);
     if (!path) {
         printf(RED "[ERROR]" RESET " Cannot find module: %s\n", module);
         return;
@@ -126,18 +212,24 @@ static void importModule(const char* module, const char* from_module) {
     const char* ext = strrchr(path, '.');
     bool is_package = ext && strcmp(ext, ".svlib") == 0;
     
-    // Sauvegarder ancien chemin
+    // Sauvegarder ancien état
     char* old_path = vm.import_path ? my_strdup(vm.import_path) : NULL;
+    char* old_package = vm.current_package ? my_strdup(vm.current_package) : NULL;
     
-    // Définir nouveau chemin basé sur le fichier
+    // Définir nouveau chemin et package
     char* dir_path = my_strdup(path);
     char* last_slash = strrchr(dir_path, '/');
     if (last_slash) {
         if (is_package) {
-            // Pour un package, le chemin est le dossier du package
-            *last_slash = '\0';
+            // Pour un package, extraire le nom du package du chemin
+            *last_slash = '\0'; // Enlever le fichier .svlib
+            char* package_name = strrchr(dir_path, '/');
+            if (package_name) {
+                setCurrentPackage(package_name + 1);
+            } else {
+                setCurrentPackage(dir_path);
+            }
         } else {
-            // Pour un fichier .swf, le chemin est son dossier parent
             *last_slash = '\0';
         }
         setImportPath(dir_path);
@@ -146,17 +238,25 @@ static void importModule(const char* module, const char* from_module) {
     
     // Exécuter le module/package
     if (is_package) {
-        printf(CYAN "[PACKAGE]" RESET " Executing package manifest\n");
+        printf(CYAN "[PACKAGE]" RESET " Executing package manifest: %s\n", module);
     }
     run(source, module);
     
-    // Restaurer ancien chemin
+    // Restaurer ancien état
     if (old_path) {
         setImportPath(old_path);
         free(old_path);
     } else if (vm.import_path) {
         free(vm.import_path);
         vm.import_path = NULL;
+    }
+    
+    if (old_package) {
+        setCurrentPackage(old_package);
+        free(old_package);
+    } else if (vm.current_package) {
+        free(vm.current_package);
+        vm.current_package = NULL;
     }
     
     free(source);
@@ -273,29 +373,45 @@ static void execute(ASTNode* node) {
     
     switch (node->type) {
         case NODE_VAR: {
-            int idx = findVar(node->data.name);
-            if (idx >= 0) {
-                printf(RED "[ERROR]" RESET " Variable '%s' already exists\n", node->data.name);
-                return;
-            }
-            
-            if (vm.count < 100) {
-                strncpy(vm.vars[vm.count].name, node->data.name, 49);
-                vm.vars[vm.count].name[49] = '\0';
+            // Vérifier si c'est une déclaration d'export de package
+            if (node->data.name && strcmp(node->data.name, "CALC") == 0 && vm.current_package) {
+                if (node->left && node->left->type == NODE_STRING) {
+                    registerPackageExport(vm.current_package, "CALC", node->left->data.str_val);
+                }
+            } else if (node->data.name && strcmp(node->data.name, "ALGO") == 0 && vm.current_package) {
+                if (node->left && node->left->type == NODE_STRING) {
+                    registerPackageExport(vm.current_package, "ALGO", node->left->data.str_val);
+                }
+            } else if (node->data.name && strcmp(node->data.name, "ARITH") == 0 && vm.current_package) {
+                if (node->left && node->left->type == NODE_STRING) {
+                    registerPackageExport(vm.current_package, "ARITH", node->left->data.str_val);
+                }
+            } else {
+                // Déclaration de variable normale
+                int idx = findVar(node->data.name);
+                if (idx >= 0) {
+                    printf(RED "[ERROR]" RESET " Variable '%s' already exists\n", node->data.name);
+                    return;
+                }
                 
-                if (node->left) {
-                    if (node->left->type == NODE_FLOAT) {
-                        vm.vars[vm.count].is_float = true;
-                        vm.vars[vm.count].value.float_val = evalFloat(node->left);
+                if (vm.count < 100) {
+                    strncpy(vm.vars[vm.count].name, node->data.name, 49);
+                    vm.vars[vm.count].name[49] = '\0';
+                    
+                    if (node->left) {
+                        if (node->left->type == NODE_FLOAT) {
+                            vm.vars[vm.count].is_float = true;
+                            vm.vars[vm.count].value.float_val = evalFloat(node->left);
+                        } else {
+                            vm.vars[vm.count].is_float = false;
+                            vm.vars[vm.count].value.int_val = (int)evalFloat(node->left);
+                        }
                     } else {
                         vm.vars[vm.count].is_float = false;
-                        vm.vars[vm.count].value.int_val = (int)evalFloat(node->left);
+                        vm.vars[vm.count].value.int_val = 0;
                     }
-                } else {
-                    vm.vars[vm.count].is_float = false;
-                    vm.vars[vm.count].value.int_val = 0;
+                    vm.count++;
                 }
-                vm.count++;
             }
             break;
         }
@@ -405,6 +521,7 @@ static void repl() {
     }
     
     if (vm.import_path) free(vm.import_path);
+    if (vm.current_package) free(vm.current_package);
 }
 
 int main(int argc, char* argv[]) {
@@ -443,6 +560,7 @@ int main(int argc, char* argv[]) {
         free(source);
         
         if (vm.import_path) free(vm.import_path);
+        if (vm.current_package) free(vm.current_package);
     }
     
     return 0;
