@@ -133,7 +133,7 @@ static ASTNode* parseImportStatement() {
     }
     
     if (!match(TK_SEMICOLON)) {
-        printf(RED "[ERROR]" RESET " Expected ';' after import statement\n");
+        printf(RED "[ERROR]" RESET " >> ';' expected after import statement\n");
         for (int i = 0; i < count; i++) free(imports[i]);
         free(imports);
         free(node->from_module);
