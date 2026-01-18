@@ -122,8 +122,44 @@ static void setCurrentPackage(const char* package) {
 }
 
 static char* findImportFile(const char* module, const char* from_package) {
-    // 1. Si chemin direct
+    // DEBUG: Afficher ce qu'on cherche
+    printf(YELLOW "[FIND]" RESET " Looking for: '%s'", module);
+    if (from_package) printf(" from package: '%s'", from_package);
+    if (vm.current_package) printf(" (current package: '%s')", vm.current_package);
+    printf("\n");
+    
+    // 1. Si chemin direct (commence par . ou /)
     if (module[0] == '.' || module[0] == '/') {
+        // Si c'est un chemin relatif (commence par .) ET qu'on est dans un package
+        if (module[0] == '.' && vm.current_package) {
+            printf(CYAN "[PACKAGE]" RESET " Resolving relative path in package %s: %s\n", 
+                   vm.current_package, module);
+            
+            // Construire le chemin absolu dans le package
+            char* full_path = malloc(strlen("/usr/local/lib/swift/") + 
+                                    strlen(vm.current_package) + 
+                                    strlen(module) + 10);
+            if (!full_path) return NULL;
+            
+            // Si c'est "./fichier", enlever le "./"
+            const char* actual_module = module;
+            if (strncmp(module, "./", 2) == 0) {
+                actual_module = module + 2;
+            } else if (strncmp(module, "../", 3) == 0) {
+                // Pour l'instant, on ne gère pas ../
+                printf(RED "[ERROR]" RESET " Parent directory '..' not supported in package imports\n");
+                free(full_path);
+                return NULL;
+            }
+            
+            sprintf(full_path, "/usr/local/lib/swift/%s/%s", 
+                    vm.current_package, actual_module);
+            
+            printf(CYAN "[PACKAGE]" RESET " Full path: %s\n", full_path);
+            return full_path;
+        }
+        
+        // Sinon, chemin normal
         return my_strdup(module);
     }
     
@@ -131,7 +167,7 @@ static char* findImportFile(const char* module, const char* from_package) {
     if (from_package) {
         char* resolved = resolvePackageExport(module, from_package);
         if (resolved) {
-            printf(CYAN "[PACKAGE]" RESET " Resolved %s -> %s from package %s\n", 
+            printf(CYAN "[PACKAGE]" RESET " Resolved export %s -> %s from package %s\n", 
                    module, resolved, from_package);
             return resolved;
         }
@@ -172,6 +208,19 @@ static char* findImportFile(const char* module, const char* from_package) {
     sprintf(path, "%s%s", base_path, module);
     if (access(path, F_OK) == 0) {
         return path;
+    }
+    
+    // 6. Si on est dans un package, essayer dans le package courant
+    if (vm.current_package) {
+        sprintf(path, "/usr/local/lib/swift/%s/%s", vm.current_package, module);
+        if (access(path, F_OK) == 0) {
+            return path;
+        }
+        
+        sprintf(path, "/usr/local/lib/swift/%s/%s.swf", vm.current_package, module);
+        if (access(path, F_OK) == 0) {
+            return path;
+        }
     }
     
     free(path);
@@ -373,21 +422,15 @@ static void execute(ASTNode* node) {
     
     switch (node->type) {
         case NODE_VAR: {
-            // Vérifier si c'est une déclaration d'export de package
-            if (node->data.name && strcmp(node->data.name, "CALC") == 0 && vm.current_package) {
-                if (node->left && node->left->type == NODE_STRING) {
-                    registerPackageExport(vm.current_package, "CALC", node->left->data.str_val);
-                }
-            } else if (node->data.name && strcmp(node->data.name, "ALGO") == 0 && vm.current_package) {
-                if (node->left && node->left->type == NODE_STRING) {
-                    registerPackageExport(vm.current_package, "ALGO", node->left->data.str_val);
-                }
-            } else if (node->data.name && strcmp(node->data.name, "ARITH") == 0 && vm.current_package) {
-                if (node->left && node->left->type == NODE_STRING) {
-                    registerPackageExport(vm.current_package, "ARITH", node->left->data.str_val);
-                }
+            // Si on est dans un package, les variables avec des valeurs string
+            // sont considérées comme des exports
+            if (vm.current_package && node->left && node->left->type == NODE_STRING) {
+                // C'est un export de package
+                registerPackageExport(vm.current_package, node->data.name, node->left->data.str_val);
+                printf(CYAN "[EXPORT]" RESET " %s exports %s as %s\n", 
+                       vm.current_package, node->left->data.str_val, node->data.name);
             } else {
-                // Déclaration de variable normale
+                // Variable normale
                 int idx = findVar(node->data.name);
                 if (idx >= 0) {
                     printf(RED "[ERROR]" RESET " Variable '%s' already exists\n", node->data.name);
