@@ -106,17 +106,20 @@ static void skipWhitespace() {
 // ======================================================
 // [SECTION] STRING LEXING
 // ======================================================
-static Token string() {
-    // Skip opening quote
-    advance();
+static Token string(char quote_char) {
+    // Skip opening quote (déjà consommé)
     
-    while (peek() != '"' && !isAtEnd()) {
+    while (peek() != quote_char && !isAtEnd()) {
         if (peek() == '\n') lexer.line++;
         if (peek() == '\\') { // Handle escape sequences
             advance();
             switch (peek()) {
-                case 'n': case 't': case 'r': case '\\': case '"':
+                case 'n': case 't': case 'r': case '\\': 
+                case '"': case '\'':  // Support both quote types in escapes
                     advance();
+                    break;
+                default:
+                    advance(); // Just skip unknown escape
                     break;
             }
         } else {
@@ -125,7 +128,9 @@ static Token string() {
     }
     
     if (isAtEnd()) {
-        return errorToken("Unterminated string.");
+        char error_msg[64];
+        snprintf(error_msg, sizeof(error_msg), "Unterminated string (started with '%c')", quote_char);
+        return errorToken(error_msg);
     }
     
     // Skip closing quote
@@ -138,22 +143,27 @@ static Token string() {
         // Copy string content (skip quotes)
         const char* src = lexer.start + 1;
         char* dest = str;
+        int dest_idx = 0;
+        
         for (int i = 0; i < length; i++) {
             if (src[i] == '\\') {
                 i++; // Skip backslash
-                switch (src[i]) {
-                    case 'n': *dest++ = '\n'; break;
-                    case 't': *dest++ = '\t'; break;
-                    case 'r': *dest++ = '\r'; break;
-                    case '\\': *dest++ = '\\'; break;
-                    case '"': *dest++ = '"'; break;
-                    default: *dest++ = src[i]; break;
+                if (i < length) {
+                    switch (src[i]) {
+                        case 'n': str[dest_idx++] = '\n'; break;
+                        case 't': str[dest_idx++] = '\t'; break;
+                        case 'r': str[dest_idx++] = '\r'; break;
+                        case '\\': str[dest_idx++] = '\\'; break;
+                        case '"': str[dest_idx++] = '"'; break;
+                        case '\'': str[dest_idx++] = '\''; break;
+                        default: str[dest_idx++] = src[i]; break;
+                    }
                 }
             } else {
-                *dest++ = src[i];
+                str[dest_idx++] = src[i];
             }
         }
-        *dest = '\0';
+        str[dest_idx] = '\0';
     }
     
     Token token = makeToken(TK_STRING);
@@ -179,10 +189,11 @@ static Token number() {
     
     if (is_float) {
         // Parse as float
-        char* num_str = malloc(lexer.current - lexer.start + 1);
+        int length = (int)(lexer.current - lexer.start);
+        char* num_str = malloc(length + 1);
         if (num_str) {
-            strncpy(num_str, lexer.start, lexer.current - lexer.start);
-            num_str[lexer.current - lexer.start] = '\0';
+            strncpy(num_str, lexer.start, length);
+            num_str[length] = '\0';
             
             Token token = makeToken(TK_FLOAT);
             token.value.float_val = atof(num_str);
@@ -191,10 +202,11 @@ static Token number() {
         }
     } else {
         // Parse as integer
-        char* num_str = malloc(lexer.current - lexer.start + 1);
+        int length = (int)(lexer.current - lexer.start);
+        char* num_str = malloc(length + 1);
         if (num_str) {
-            strncpy(num_str, lexer.start, lexer.current - lexer.start);
-            num_str[lexer.current - lexer.start] = '\0';
+            strncpy(num_str, lexer.start, length);
+            num_str[length] = '\0';
             
             Token token = makeToken(TK_INT);
             token.value.int_val = atoll(num_str);
@@ -358,8 +370,9 @@ Token scanToken() {
             if (match('|')) return makeToken(TK_OR);
             break;
         
-        // String literal
-        case '"': return string();
+        // String literal - support BOTH single and double quotes
+        case '"': return string('"');   // Double quotes
+        case '\'': return string('\''); // Single quotes
     }
     
     // Numbers
