@@ -1,510 +1,401 @@
-// swf.c - SwiftVelox Compiler/Interpreter v2.1 (CORRIGÉ)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <stdbool.h>
-#include <math.h>
+#include "common.h"
 
-// ============ CONSTANTES SIMPLIFIÉES ============
-#define MAX_VARS 100
-#define MAX_CODE_LEN 4096
-#define MAX_LINE_LEN 256
-#define MAX_STR_LEN 256
+extern Token scanToken();
+extern void initLexer(const char* source);
 
-// ============ STRUCTURES SIMPLIFIÉES ============
-typedef struct Variable {
-    char name[50];
-    int value;
-    bool isConst;
-} Variable;
+// ======================================================
+// [SECTION] PARSER STATE
+// ======================================================
+static Token current;
+static Token previous;
 
-typedef struct VM {
-    Variable vars[MAX_VARS];
-    int varCount;
-    bool hadError;
-    bool debugMode;
-} VM;
+static void advance() {
+    previous = current;
+    current = scanToken();
+}
 
-// ============ FONCTIONS UTILITAIRES ============
-char* trim(char* str) {
-    char* end;
+static bool match(TokenKind kind) {
+    if (current.kind == kind) {
+        advance();
+        return true;
+    }
+    return false;
+}
+
+static ASTNode* newNode(NodeType type) {
+    ASTNode* node = calloc(1, sizeof(ASTNode));
+    if (node) {
+        node->type = type;
+        node->import_count = 0;
+        node->from_module = NULL;
+    }
+    return node;
+}
+
+// ======================================================
+// [SECTION] IMPORT PARSING
+// ======================================================
+static ASTNode* parseImportStatement() {
+    // Syntaxe: import() {"module"};
+    //          import() {"./file.swf"};
+    //          import() {"PIL", from "module"};
     
-    // Trim leading
-    while (*str == ' ' || *str == '\t' || *str == '\n' || *str == '\r') {
-        str++;
+    if (!match(TK_LPAREN)) {
+        printf(RED "[ERROR]" RESET " Expected '(' after import\n");
+        return NULL;
     }
     
-    if (*str == 0) return str;
-    
-    // Trim trailing
-    end = str + strlen(str) - 1;
-    while (end > str && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r' || *end == ';')) {
-        *end = 0;
-        end--;
+    if (!match(TK_RPAREN)) {
+        printf(RED "[ERROR]" RESET " Expected ')' after '('\n");
+        return NULL;
     }
     
-    return str;
-}
-
-// ============ GESTION VM ============
-VM* createVM() {
-    VM* vm = malloc(sizeof(VM));
-    vm->varCount = 0;
-    vm->hadError = false;
-    vm->debugMode = false;
-    return vm;
-}
-
-void freeVM(VM* vm) {
-    free(vm);
-}
-
-int findVar(VM* vm, const char* name) {
-    for (int i = 0; i < vm->varCount; i++) {
-        if (strcmp(vm->vars[i].name, name) == 0) {
-            return i;
-        }
+    if (!match(TK_LBRACE)) {
+        printf(RED "[ERROR]" RESET " Expected '{' for import list\n");
+        return NULL;
     }
-    return -1;
-}
-
-void defineVar(VM* vm, const char* name, int value, bool isConst) {
-    int idx = findVar(vm, name);
-    if (idx >= 0) {
-        if (vm->vars[idx].isConst) {
-            printf("Erreur: %s est une constante (net)\n", name);
-            vm->hadError = true;
-            return;
-        }
-        vm->vars[idx].value = value;
-        if (vm->debugMode) printf("[DEBUG] %s = %d\n", name, value);
+    
+    ASTNode* node = newNode(NODE_IMPORT);
+    if (!node) return NULL;
+    
+    node->from_module = NULL;
+    
+    // Parse import list
+    char** imports = NULL;
+    int count = 0;
+    int capacity = 4;
+    
+    imports = malloc(capacity * sizeof(char*));
+    if (!imports) {
+        free(node);
+        return NULL;
+    }
+    
+    // Premier import
+    if (match(TK_STRING)) {
+        imports[count++] = str_copy(previous.value.str_val);
     } else {
-        if (vm->varCount >= MAX_VARS) {
-            printf("Erreur: trop de variables\n");
-            vm->hadError = true;
-            return;
-        }
-        strcpy(vm->vars[vm->varCount].name, name);
-        vm->vars[vm->varCount].value = value;
-        vm->vars[vm->varCount].isConst = isConst;
-        vm->varCount++;
-        if (vm->debugMode) printf("[DEBUG] %s %s = %d\n", isConst ? "net" : "ver", name, value);
-    }
-}
-
-int getVar(VM* vm, const char* name) {
-    int idx = findVar(vm, name);
-    if (idx >= 0) {
-        return vm->vars[idx].value;
-    }
-    printf("Erreur: variable '%s' non définie\n", name);
-    vm->hadError = true;
-    return 0;
-}
-
-// ============ ÉVALUATEUR D'EXPRESSIONS CORRIGÉ ============
-int evaluateExpression(VM* vm, const char* expr) {
-    char expression[MAX_STR_LEN];
-    strcpy(expression, expr);
-    char* ptr = trim(expression);
-    
-    // Si vide
-    if (strlen(ptr) == 0) return 0;
-    
-    // Évaluation récursive avec gestion des parenthèses
-    return evalExpr(vm, &ptr);
-}
-
-int evalExpr(VM* vm, char** ptr) {
-    return evalTerm(vm, ptr);
-}
-
-int evalTerm(VM* vm, char** ptr) {
-    int result = evalFactor(vm, ptr);
-    
-    while (**ptr == '+' || **ptr == '-') {
-        char op = **ptr;
-        (*ptr)++;
-        
-        int next = evalFactor(vm, ptr);
-        
-        if (op == '+') {
-            result += next;
-        } else {
-            result -= next;
-        }
+        printf(RED "[ERROR]" RESET " Expected string in import list\n");
+        free(imports);
+        free(node);
+        return NULL;
     }
     
-    return result;
-}
-
-int evalFactor(VM* vm, char** ptr) {
-    int result = evalPrimary(vm, ptr);
-    
-    while (**ptr == '*' || **ptr == '/') {
-        char op = **ptr;
-        (*ptr)++;
-        
-        int next = evalPrimary(vm, ptr);
-        
-        if (op == '*') {
-            result *= next;
-        } else {
-            if (next == 0) {
-                printf("Erreur: division par zéro\n");
-                vm->hadError = true;
-                return 0;
-            }
-            result /= next;
-        }
-    }
-    
-    return result;
-}
-
-int evalPrimary(VM* vm, char** ptr) {
-    // Ignorer les espaces
-    while (**ptr == ' ') (*ptr)++;
-    
-    if (**ptr == '(') {
-        (*ptr)++; // Skip '('
-        int result = evalExpr(vm, ptr);
-        
-        if (**ptr == ')') {
-            (*ptr)++; // Skip ')'
-        } else {
-            printf("Erreur: parenthèse fermante manquante\n");
-            vm->hadError = true;
-        }
-        
-        return result;
-    }
-    
-    // Si c'est un nombre
-    if (isdigit(**ptr)) {
-        int num = 0;
-        while (isdigit(**ptr)) {
-            num = num * 10 + (**ptr - '0');
-            (*ptr)++;
-        }
-        return num;
-    }
-    
-    // Si c'est une variable
-    if (isalpha(**ptr) || **ptr == '_') {
-        char varName[MAX_STR_LEN];
-        int i = 0;
-        
-        while (isalnum(**ptr) || **ptr == '_') {
-            varName[i++] = **ptr;
-            (*ptr)++;
-        }
-        varName[i] = 0;
-        
-        return getVar(vm, varName);
-    }
-    
-    // Erreur
-    printf("Erreur: expression invalide\n");
-    vm->hadError = true;
-    return 0;
-}
-
-// ============ PARSER CORRIGÉ ============
-void removeComments(char* line) {
-    char* comment = strstr(line, "//");
-    if (comment) {
-        *comment = 0;
-    }
-}
-
-void executeLine(VM* vm, const char* line) {
-    char buffer[MAX_LINE_LEN];
-    strcpy(buffer, line);
-    
-    // Supprimer les commentaires
-    removeComments(buffer);
-    
-    char* cmd = trim(buffer);
-    if (strlen(cmd) == 0) return;
-    
-    if (vm->debugMode) printf("[DEBUG] >>> %s\n", cmd);
-    
-    // === DÉCLARATIONS ===
-    
-    // ver
-    if (strncmp(cmd, "ver ", 4) == 0) {
-        char rest[MAX_LINE_LEN];
-        strcpy(rest, cmd + 4);
-        trim(rest);
-        
-        // Chercher '='
-        char* equals = strchr(rest, '=');
-        if (equals) {
-            *equals = 0;
-            char* name = trim(rest);
-            char* expr = trim(equals + 1);
+    // Imports supplémentaires ou 'from'
+    while (match(TK_COMMA)) {
+        // Vérifier 'from'
+        if (current.kind == TK_IDENT && 
+            current.value.str_val && 
+            strcmp(current.value.str_val, "from") == 0) {
             
-            if (strlen(name) > 0) {
-                int value = evaluateExpression(vm, expr);
-                if (!vm->hadError) {
-                    defineVar(vm, name, value, false);
-                }
-            }
-        } else {
-            // Déclaration sans valeur
-            defineVar(vm, rest, 0, false);
-        }
-    }
-    // net
-    else if (strncmp(cmd, "net ", 4) == 0) {
-        char rest[MAX_LINE_LEN];
-        strcpy(rest, cmd + 4);
-        trim(rest);
-        
-        char* equals = strchr(rest, '=');
-        if (equals) {
-            *equals = 0;
-            char* name = trim(rest);
-            char* expr = trim(equals + 1);
+            advance(); // Consommer 'from'
             
-            if (strlen(name) > 0) {
-                int value = evaluateExpression(vm, expr);
-                if (!vm->hadError) {
-                    defineVar(vm, name, value, true);
-                }
+            if (!match(TK_STRING)) {
+                printf(RED "[ERROR]" RESET " Expected module name after 'from'\n");
+                break;
             }
-        }
-    }
-    // Print
-    else if (strncmp(cmd, "Print(", 6) == 0) {
-        // Trouver la fin
-        char* endParen = strchr(cmd, ')');
-        if (endParen) {
-            char content[MAX_STR_LEN];
-            int len = endParen - cmd - 6;
-            if (len > 0 && len < MAX_STR_LEN - 1) {
-                strncpy(content, cmd + 6, len);
-                content[len] = 0;
-                trim(content);
-                
-                // Si chaîne entre guillemets
-                if (content[0] == '"' && content[strlen(content)-1] == '"') {
-                    content[strlen(content)-1] = 0;
-                    printf("%s\n", content + 1);
-                } else {
-                    // Évaluer comme expression
-                    int value = evaluateExpression(vm, content);
-                    if (!vm->hadError) {
-                        printf("%d\n", value);
-                    }
-                }
-            }
-        } else {
-            printf("Erreur: Print sans ')'\n");
-            vm->hadError = true;
-        }
-    }
-    // Affectation x = y
-    else if (strchr(cmd, '=') && !strstr(cmd, "ver ") && !strstr(cmd, "net ")) {
-        char rest[MAX_LINE_LEN];
-        strcpy(rest, cmd);
-        
-        char* equals = strchr(rest, '=');
-        if (equals) {
-            *equals = 0;
-            char* name = trim(rest);
-            char* expr = trim(equals + 1);
             
-            if (strlen(name) > 0) {
-                int value = evaluateExpression(vm, expr);
-                if (!vm->hadError) {
-                    // Vérifier si la variable existe
-                    int idx = findVar(vm, name);
-                    if (idx >= 0) {
-                        if (vm->vars[idx].isConst) {
-                            printf("Erreur: %s est une constante\n", name);
-                            vm->hadError = true;
-                        } else {
-                            vm->vars[idx].value = value;
-                            if (vm->debugMode) printf("[DEBUG] %s = %d\n", name, value);
-                        }
-                    } else {
-                        // Créer automatiquement (comme ver)
-                        defineVar(vm, name, value, false);
-                    }
-                }
+            node->from_module = str_copy(previous.value.str_val);
+            break;
+        }
+        
+        // Autre import
+        if (count >= capacity) {
+            capacity *= 2;
+            char** new_imports = realloc(imports, capacity * sizeof(char*));
+            if (!new_imports) {
+                for (int i = 0; i < count; i++) free(imports[i]);
+                free(imports);
+                free(node);
+                return NULL;
             }
+            imports = new_imports;
+        }
+        
+        if (match(TK_STRING)) {
+            imports[count++] = str_copy(previous.value.str_val);
+        } else {
+            printf(RED "[ERROR]" RESET " Expected string after comma\n");
+            break;
         }
     }
-    // Expression seule (pour REPL)
-    else {
-        // Essayer d'évaluer
-        int value = evaluateExpression(vm, cmd);
-        if (!vm->hadError) {
-            printf("%d\n", value);
+    
+    if (!match(TK_RBRACE)) {
+        printf(RED "[ERROR]" RESET " Expected '}' after import list\n");
+        for (int i = 0; i < count; i++) free(imports[i]);
+        free(imports);
+        free(node->from_module);
+        free(node);
+        return NULL;
+    }
+    
+    if (!match(TK_SEMICOLON)) {
+        printf(RED "[ERROR]" RESET " >> ';' expected after import statement\n");
+        for (int i = 0; i < count; i++) free(imports[i]);
+        free(imports);
+        free(node->from_module);
+        free(node);
+        return NULL;
+    }
+    
+    node->data.imports = imports;
+    node->import_count = count;
+    return node;
+}
+
+// ======================================================
+// [SECTION] EXPRESSION PARSING
+// ======================================================
+static ASTNode* parsePrimary();
+static ASTNode* parseExpression();
+
+static ASTNode* parsePrimary() {
+    if (match(TK_INT)) {
+        ASTNode* node = newNode(NODE_INT);
+        if (node) node->data.int_val = previous.value.int_val;
+        return node;
+    }
+    
+    if (match(TK_FLOAT)) {
+        ASTNode* node = newNode(NODE_FLOAT);
+        if (node) node->data.float_val = previous.value.float_val;
+        return node;
+    }
+    
+    if (match(TK_STRING)) {
+        ASTNode* node = newNode(NODE_STRING);
+        if (node) node->data.str_val = str_copy(previous.value.str_val);
+        return node;
+    }
+    
+    if (match(TK_TRUE) || match(TK_FALSE)) {
+        ASTNode* node = newNode(NODE_INT);
+        if (node) node->data.int_val = (previous.kind == TK_TRUE) ? 1 : 0;
+        return node;
+    }
+    
+    if (match(TK_IDENT)) {
+        ASTNode* node = newNode(NODE_IDENT);
+        if (node) node->data.name = str_copy(previous.value.str_val);
+        return node;
+    }
+    
+    if (match(TK_LPAREN)) {
+        ASTNode* expr = parseExpression();
+        if (expr) {
+            if (match(TK_RPAREN)) {
+                return expr;
+            }
+            free(expr);
         }
+        return NULL;
+    }
+    
+    return NULL;
+}
+
+static int getPrecedence(TokenKind op) {
+    switch (op) {
+        case TK_EQ: case TK_NEQ: case TK_LT: case TK_GT: case TK_LTE: case TK_GTE:
+            return 1;
+        case TK_PLUS: case TK_MINUS:
+            return 2;
+        case TK_MULT: case TK_DIV: case TK_MOD:
+            return 3;
+        default:
+            return 0;
     }
 }
 
-void executeCode(VM* vm, const char* code) {
-    char copy[MAX_CODE_LEN];
-    strcpy(copy, code);
-    
-    char* line = strtok(copy, "\n");
-    while (line && !vm->hadError) {
-        executeLine(vm, line);
-        line = strtok(NULL, "\n");
-    }
-}
-
-// ============ FONCTIONS CLI ============
-void showBanner() {
-    printf("          🚀 SwiftVelox v2.1 🚀                 \n");
-
-}
-
-void runFile(const char* filename, bool debug) {
-    FILE* f = fopen(filename, "r");
-    if (!f) {
-        printf("❌ Erreur: impossible d'ouvrir %s\n", filename);
-        return;
-    }
-    
-    char code[MAX_CODE_LEN];
-    size_t len = fread(code, 1, sizeof(code)-1, f);
-    code[len] = 0;
-    fclose(f);
-    
-    printf("⚡ Exécution de %s...\n", filename);
-    printf("────────────────────────────────────────────\n");
-    
-    VM* vm = createVM();
-    vm->debugMode = debug;
-    
-    executeCode(vm, code);
-    
-    printf("────────────────────────────────────────────\n");
-    if (vm->hadError) {
-        printf("❌ Erreurs pendant l'exécution\n");
-    } else {
-        printf("✅ Exécution terminée avec succès\n");
-    }
-    
-    freeVM(vm);
-}
-
-void repl() {
-    showBanner();
-    printf("\n🔧 Mode REPL interactif\n");
-    printf("Tapez 'exit' pour quitter, 'help' pour l'aide\n");
-    printf("────────────────────────────────────────────\n");
-    
-    VM* vm = createVM();
-    char line[MAX_LINE_LEN];
+static ASTNode* parseBinary(int min_prec) {
+    ASTNode* left = parsePrimary();
+    if (!left) return NULL;
     
     while (1) {
-        printf("swift> ");
-        if (!fgets(line, sizeof(line), stdin)) break;
+        TokenKind op = current.kind;
+        int prec = getPrecedence(op);
         
-        line[strcspn(line, "\n")] = 0;
+        if (prec == 0 || prec < min_prec) break;
         
-        if (strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0) break;
-        if (strcmp(line, "help") == 0) {
-            printf("\nCommandes:\n");
-            printf("  exit, quit  - Quitter\n");
-            printf("  help        - Aide\n");
-            printf("  debug on/off- Mode debug\n");
-            printf("  clear       - Effacer variables\n");
-            printf("  list        - Lister variables\n");
-            printf("\nSyntaxe:\n");
-            printf("  ver x = 10      - Variable\n");
-            printf("  net y = 20      - Constante\n");
-            printf("  Print(x)        - Afficher\n");
-            printf("  Print(\"text\")  - Afficher texte\n");
-            printf("  x = y + z * 2   - Affectation\n");
-            continue;
+        advance(); // Consommer l'opérateur
+        
+        ASTNode* node = newNode(NODE_BINARY);
+        if (!node) {
+            free(left);
+            return NULL;
         }
-        if (strcmp(line, "debug on") == 0) {
-            vm->debugMode = true;
-            printf("Debug activé\n");
-            continue;
+        
+        node->data.int_val = op;
+        node->left = left;
+        node->right = parseBinary(prec + 1);
+        
+        if (!node->right) {
+            free(node);
+            free(left);
+            return NULL;
         }
-        if (strcmp(line, "debug off") == 0) {
-            vm->debugMode = false;
-            printf("Debug désactivé\n");
-            continue;
+        
+        left = node;
+    }
+    
+    return left;
+}
+
+static ASTNode* parseExpression() {
+    return parseBinary(0);
+}
+
+// ======================================================
+// [SECTION] STATEMENT PARSING
+// ======================================================
+static ASTNode* parseStatement();
+
+static ASTNode* parseVarDecl() {
+    if (!match(TK_IDENT)) {
+        printf(RED "[ERROR]" RESET " Expected variable name\n");
+        return NULL;
+    }
+    
+    char* var_name = str_copy(previous.value.str_val);
+    ASTNode* node = newNode(NODE_VAR);
+    if (!node) {
+        free(var_name);
+        return NULL;
+    }
+    
+    node->data.name = var_name;
+    
+    if (match(TK_ASSIGN)) {
+        node->left = parseExpression();
+    }
+    
+    if (!match(TK_SEMICOLON)) {
+        printf(RED "[ERROR]" RESET " >> ';' expected after variable declaration\n");
+        free(node->data.name);
+        free(node);
+        return NULL;
+    }
+    
+    return node;
+}
+
+static ASTNode* parsePrint() {
+    if (!match(TK_LPAREN)) {
+        printf(RED "[ERROR]" RESET " Expected '(' after print\n");
+        return NULL;
+    }
+    
+    ASTNode* node = newNode(NODE_PRINT);
+    if (!node) return NULL;
+    
+    node->left = parseExpression();
+    
+    if (!match(TK_RPAREN)) {
+        printf(RED "[ERROR]" RESET " Expected ')' after expression\n");
+        free(node);
+        return NULL;
+    }
+    
+    if (!match(TK_SEMICOLON)) {
+        printf(RED "[ERROR]" RESET " >> ';' expected after print statement\n");
+        free(node);
+        return NULL;
+    }
+    
+    return node;
+}
+
+static ASTNode* parseAssignment(char* name) {
+    if (!match(TK_ASSIGN)) {
+        printf(RED "[ERROR]" RESET " Expected '=' after identifier\n");
+        free(name);
+        return NULL;
+    }
+    
+    ASTNode* node = newNode(NODE_ASSIGN);
+    if (!node) {
+        free(name);
+        return NULL;
+    }
+    
+    node->data.name = name;
+    node->left = parseExpression();
+    
+    if (!match(TK_SEMICOLON)) {
+        printf(RED "[ERROR]" RESET " >> ';' expected after assignment\n");
+        free(node->data.name);
+        free(node);
+        return NULL;
+    }
+    
+    return node;
+}
+
+static ASTNode* parseStatement() {
+    if (match(TK_VAR)) {
+        return parseVarDecl();
+    }
+    
+    if (match(TK_PRINT)) {
+        return parsePrint();
+    }
+    
+    if (match(TK_IMPORT)) {
+        return parseImportStatement();
+    }
+    
+    // Assignment
+    if (current.kind == TK_IDENT) {
+        char* name = str_copy(current.value.str_val);
+        advance();
+        
+        if (current.kind == TK_ASSIGN) {
+            return parseAssignment(name);
         }
-        if (strcmp(line, "clear") == 0) {
-            freeVM(vm);
-            vm = createVM();
-            printf("Variables effacées\n");
-            continue;
+        
+        free(name);
+        printf(RED "[ERROR]" RESET " Identifier without assignment not supported\n");
+        return NULL;
+    }
+    
+    return NULL;
+}
+
+// ======================================================
+// [SECTION] MAIN PARSER FUNCTION
+// ======================================================
+ASTNode** parse(const char* source, int* count) {
+    initLexer(source);
+    advance();
+    
+    int capacity = 10;
+    ASTNode** nodes = malloc(capacity * sizeof(ASTNode*));
+    *count = 0;
+    
+    if (!nodes) return NULL;
+    
+    while (current.kind != TK_EOF) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            ASTNode** new_nodes = realloc(nodes, capacity * sizeof(ASTNode*));
+            if (!new_nodes) break;
+            nodes = new_nodes;
         }
-        if (strcmp(line, "list") == 0) {
-            if (vm->varCount == 0) {
-                printf("Aucune variable\n");
-            } else {
-                printf("Variables:\n");
-                for (int i = 0; i < vm->varCount; i++) {
-                    printf("  %s = %d (%s)\n", 
-                           vm->vars[i].name, 
-                           vm->vars[i].value,
-                           vm->vars[i].isConst ? "net" : "ver");
-                }
+        
+        ASTNode* node = parseStatement();
+        if (node) {
+            nodes[(*count)++] = node;
+        } else {
+            // Skip to next statement
+            while (current.kind != TK_SEMICOLON && current.kind != TK_EOF) {
+                advance();
             }
-            continue;
+            if (current.kind == TK_SEMICOLON) advance();
         }
-        
-        if (strlen(line) == 0) continue;
-        
-        executeLine(vm, line);
     }
     
-    freeVM(vm);
-    printf("\n👋 Au revoir!\n");
-}
-
-void printHelp() {
-    showBanner();
-    printf("\nUsage:\n");
-    printf("  swifts run <file.swf>      - Exécuter un fichier\n");
-    printf("  swifts debug <file.swf>    - Mode debug\n");
-    printf("  swifts repl                - REPL interactif\n");
-    printf("  swifts --help              - Aide\n");
-    printf("  swifts --version           - Version\n");
-}
-
-void printVersion() {
-    printf("SwiftVelox v2.1\n");
-    printf("Compilé le %s %s\n", __DATE__, __TIME__);
-}
-
-// ============ MAIN ============
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        printHelp();
-        return 1;
-    }
-    
-    if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
-        printHelp();
-    } else if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
-        printVersion();
-    } else if (strcmp(argv[1], "run") == 0 && argc > 2) {
-        runFile(argv[2], false);
-    } else if (strcmp(argv[1], "debug") == 0 && argc > 2) {
-        runFile(argv[2], true);
-    } else if (strcmp(argv[1], "repl") == 0) {
-        repl();
-    } else if (argc == 2 && strstr(argv[1], ".swf")) {
-        runFile(argv[1], false);
-    } else {
-        printf("Commande non reconnue\n");
-        printHelp();
-        return 1;
-    }
-    
-    return 0;
+    return nodes;
 }
