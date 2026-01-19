@@ -29,6 +29,7 @@ typedef enum {
     TK_NULL, TK_UNDEFINED,
     // Identifiers
     TK_IDENT,
+    TK_AS,
     // Operators
     TK_PLUS, TK_MINUS, TK_MULT, TK_DIV, TK_MOD,
     TK_POW, TK_CONCAT,
