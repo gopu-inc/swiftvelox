@@ -72,6 +72,7 @@ static int package_count = 0;
 
 static char* current_module = NULL;
 static char* current_package = NULL;
+static char* current_dir = NULL;  // Répertoire courant pour les imports relatifs
 
 // ======================================================
 // [SECTION] HELPER FUNCTIONS
@@ -150,6 +151,113 @@ static void updateDBVar(const char* name, const char* value_str) {
 }
 
 // ======================================================
+// [SECTION] PATH RESOLUTION FOR LOCAL IMPORTS
+// ======================================================
+static char* resolveRelativePath(const char* base_dir, const char* relative_path) {
+    if (!relative_path || strlen(relative_path) == 0) {
+        return NULL;
+    }
+    
+    // Si le chemin commence par . ou .., c'est un chemin relatif
+    if (relative_path[0] != '.' && relative_path[0] != '/') {
+        // Chemin absolu ou nom de module système
+        return strdup(relative_path);
+    }
+    
+    // Normaliser le chemin de base
+    char* normalized_base = NULL;
+    if (base_dir) {
+        normalized_base = strdup(base_dir);
+    } else {
+        normalized_base = strdup(".");
+    }
+    
+    // Simplifier ./ et ../
+    char* path = strdup(relative_path);
+    char* result = malloc(1024);
+    result[0] = '\0';
+    
+    if (relative_path[0] == '/') {
+        // Chemin absolu
+        strcpy(result, relative_path);
+    } else {
+        // Chemin relatif
+        if (relative_path[0] == '.' && relative_path[1] == '/') {
+            // ./file.swf
+            sprintf(result, "%s/%s", normalized_base, relative_path + 2);
+        } else if (strncmp(relative_path, "../", 3) == 0) {
+            // ../file.swf
+            // Remonter d'un niveau
+            char* last_slash = strrchr(normalized_base, '/');
+            if (last_slash) {
+                *last_slash = '\0';
+                sprintf(result, "%s/%s", normalized_base, relative_path + 3);
+            } else {
+                sprintf(result, "./%s", relative_path + 3);
+            }
+        } else if (strcmp(relative_path, "..") == 0) {
+            // Répertoire parent
+            char* last_slash = strrchr(normalized_base, '/');
+            if (last_slash) {
+                *last_slash = '\0';
+                strcpy(result, normalized_base);
+            } else {
+                strcpy(result, ".");
+            }
+        } else if (strcmp(relative_path, ".") == 0) {
+            // Répertoire courant
+            strcpy(result, normalized_base);
+        } else {
+            // Autre (traiter comme ./)
+            sprintf(result, "%s/%s", normalized_base, relative_path);
+        }
+    }
+    
+    // Normaliser le chemin (enlever les //, ./ inutiles, etc.)
+    char* normalized = malloc(strlen(result) + 1);
+    char* components[100];
+    int comp_count = 0;
+    
+    char* token = strtok(result, "/");
+    while (token) {
+        if (strcmp(token, ".") == 0) {
+            // Ignorer .
+        } else if (strcmp(token, "..") == 0) {
+            // Remonter
+            if (comp_count > 0) {
+                comp_count--;
+            }
+        } else {
+            components[comp_count++] = token;
+        }
+        token = strtok(NULL, "/");
+    }
+    
+    // Reconstruire le chemin
+    normalized[0] = '\0';
+    if (relative_path[0] == '/') {
+        strcat(normalized, "/");
+    }
+    
+    for (int i = 0; i < comp_count; i++) {
+        strcat(normalized, components[i]);
+        if (i < comp_count - 1) {
+            strcat(normalized, "/");
+        }
+    }
+    
+    if (comp_count == 0 && normalized[0] != '/') {
+        strcat(normalized, ".");
+    }
+    
+    free(normalized_base);
+    free(path);
+    free(result);
+    
+    return normalized;
+}
+
+// ======================================================
 // [SECTION] PACKAGE MANAGEMENT
 // ======================================================
 static Package* findPackage(const char* name) {
@@ -203,7 +311,32 @@ static void addExportToPackage(const char* package_name, const char* alias, cons
 static char* findModulePath(const char* module_name, const char* from_package) {
     char* path = NULL;
     
-    // 1. Si from_package est spécifié, chercher dans le package
+    // 1. Vérifier si c'est un chemin relatif (commence par . ou /)
+    if (module_name[0] == '.' || module_name[0] == '/') {
+        // Chemin local
+        path = resolveRelativePath(current_dir, module_name);
+        
+        // Ajouter l'extension .swf si nécessaire
+        if (path && access(path, F_OK) != 0) {
+            char* with_ext = malloc(strlen(path) + 5);
+            sprintf(with_ext, "%s.swf", path);
+            if (access(with_ext, F_OK) == 0) {
+                free(path);
+                path = with_ext;
+            } else {
+                free(with_ext);
+            }
+        }
+        
+        if (path && access(path, F_OK) == 0) {
+            printf(CYAN "[RESOLVE]" RESET " Found local module: %s\n", path);
+            return path;
+        }
+        
+        free(path);
+    }
+    
+    // 2. Si from_package est spécifié, chercher dans le package
     if (from_package) {
         Package* pkg = findPackage(from_package);
         if (pkg) {
@@ -224,7 +357,7 @@ static char* findModulePath(const char* module_name, const char* from_package) {
         }
     }
     
-    // 2. Chercher dans le répertoire courant
+    // 3. Chercher dans le répertoire courant
     if (!path) {
         struct stat st;
         // Essayer .swf
@@ -243,7 +376,7 @@ static char* findModulePath(const char* module_name, const char* from_package) {
         }
     }
     
-    // 3. Chercher dans /usr/local/lib/swift/
+    // 4. Chercher dans /usr/local/lib/swift/
     if (!path) {
         char* base_path = "/usr/local/lib/swift/";
         
@@ -281,7 +414,7 @@ static char* findModulePath(const char* module_name, const char* from_package) {
         }
     }
     
-    // 4. Si current_package est défini, chercher dedans
+    // 5. Si current_package est défini, chercher dedans
     if (!path && current_package) {
         char package_path[300];
         sprintf(package_path, "/usr/local/lib/swift/%s/%s", current_package, module_name);
@@ -343,10 +476,20 @@ static void loadPackage(const char* package_name) {
     // Sauvegarder l'état courant
     char* old_package = current_package ? strdup(current_package) : NULL;
     char* old_module = current_module ? strdup(current_module) : NULL;
+    char* old_dir = current_dir ? strdup(current_dir) : NULL;
     
     // Définir le package courant
     current_package = strdup(package_name);
     current_module = strdup(package_name);
+    
+    // Extraire le répertoire du manifest
+    char* manifest_dir = strdup(manifest_path);
+    char* last_slash = strrchr(manifest_dir, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        current_dir = strdup(manifest_dir);
+    }
+    free(manifest_dir);
     
     // Exécuter le manifest
     int node_count = 0;
@@ -378,15 +521,17 @@ static void loadPackage(const char* package_name) {
     // Restaurer l'état
     free(current_package);
     free(current_module);
+    free(current_dir);
     current_package = old_package;
     current_module = old_module;
+    current_dir = old_dir;
     
     free(source);
     free(manifest_path);
 }
 
 // ======================================================
-// [SECTION] EXPRESSION EVALUATION
+// [SECTION] EXPRESSION EVALUATION (CORRECTED NUMBER FORMATTING)
 // ======================================================
 static double evalFloat(ASTNode* node) {
     if (!node) return 0.0;
@@ -462,13 +607,36 @@ static char* evalString(ASTNode* node) {
             
         case NODE_INT:
             result = malloc(32);
-            sprintf(result, "%lld", node->data.int_val);
+            sprintf(result, "%lld", node->data.int_val); // Pas de .00 pour les entiers
             break;
             
-        case NODE_FLOAT:
+        case NODE_FLOAT: {
             result = malloc(32);
-            sprintf(result, "%.2f", node->data.float_val);
+            double val = node->data.float_val;
+            // Afficher comme entier si c'est un entier
+            if (val == (int64_t)val) {
+                sprintf(result, "%lld", (int64_t)val);
+            } else {
+                // Formater intelligemment : 1 décimal max si nécessaire
+                char temp[32];
+                sprintf(temp, "%.10f", val);
+                
+                // Enlever les zéros de fin
+                char* dot = strchr(temp, '.');
+                if (dot) {
+                    char* end = temp + strlen(temp) - 1;
+                    while (end > dot && *end == '0') {
+                        *end-- = '\0';
+                    }
+                    // Enlever le point si c'est le dernier caractère
+                    if (end == dot) {
+                        *dot = '\0';
+                    }
+                }
+                strcpy(result, temp);
+            }
             break;
+        }
             
         case NODE_BOOL:
             result = str_copy(node->data.bool_val ? "true" : "false");
@@ -481,7 +649,26 @@ static char* evalString(ASTNode* node) {
                     result = str_copy(vars[idx].value.str_val);
                 } else if (vars[idx].is_float) {
                     result = malloc(32);
-                    sprintf(result, "%.2f", vars[idx].value.float_val);
+                    double val = vars[idx].value.float_val;
+                    if (val == (int64_t)val) {
+                        sprintf(result, "%lld", (int64_t)val);
+                    } else {
+                        char temp[32];
+                        sprintf(temp, "%.10f", val);
+                        
+                        // Enlever les zéros de fin
+                        char* dot = strchr(temp, '.');
+                        if (dot) {
+                            char* end = temp + strlen(temp) - 1;
+                            while (end > dot && *end == '0') {
+                                *end-- = '\0';
+                            }
+                            if (end == dot) {
+                                *dot = '\0';
+                            }
+                        }
+                        strcpy(result, temp);
+                    }
                 } else {
                     result = malloc(32);
                     sprintf(result, "%lld", vars[idx].value.int_val);
@@ -506,7 +693,25 @@ static char* evalString(ASTNode* node) {
             } else {
                 double val = evalFloat(node);
                 result = malloc(32);
-                sprintf(result, "%.2f", val);
+                if (val == (int64_t)val) {
+                    sprintf(result, "%lld", (int64_t)val);
+                } else {
+                    char temp[32];
+                    sprintf(temp, "%.10f", val);
+                    
+                    // Enlever les zéros de fin
+                    char* dot = strchr(temp, '.');
+                    if (dot) {
+                        char* end = temp + strlen(temp) - 1;
+                        while (end > dot && *end == '0') {
+                            *end-- = '\0';
+                        }
+                        if (end == dot) {
+                            *dot = '\0';
+                        }
+                    }
+                    strcpy(result, temp);
+                }
             }
             break;
         }
@@ -587,18 +792,36 @@ static void importModule(const char* module_name, const char* from_package) {
     // Sauvegarder l'état
     char* old_module = current_module ? strdup(current_module) : NULL;
     char* old_package = current_package ? strdup(current_package) : NULL;
+    char* old_dir = current_dir ? strdup(current_dir) : NULL;
     
     // Définir le module courant
     current_module = strdup(module_name);
     
+    // Extraire le répertoire du module
+    char* module_dir = strdup(module_path);
+    char* last_slash = strrchr(module_dir, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        current_dir = strdup(module_dir);
+    } else {
+        current_dir = strdup(".");
+    }
+    free(module_dir);
+    
     // Extraire le nom du package du chemin si possible
     char* path_copy = strdup(module_path);
-    char* last_slash = strrchr(path_copy, '/');
+    last_slash = strrchr(path_copy, '/');
     if (last_slash) {
         *last_slash = '\0';
         char* package_slash = strrchr(path_copy, '/');
         if (package_slash) {
-            current_package = strdup(package_slash + 1);
+            char* package_name = package_slash + 1;
+            // Vérifier si c'est un package (a un .svlib)
+            char svlib_path[500];
+            sprintf(svlib_path, "%s/%s.svlib", path_copy, package_name);
+            if (access(svlib_path, F_OK) == 0) {
+                current_package = strdup(package_name);
+            }
         }
     }
     free(path_copy);
@@ -610,17 +833,23 @@ static void importModule(const char* module_name, const char* from_package) {
     ASTNode** nodes = parse(source, &node_count);
     
     if (nodes) {
+        // Exécuter d'abord les imports
+        for (int i = 0; i < node_count; i++) {
+            if (nodes[i] && nodes[i]->type == NODE_IMPORT) {
+                executeImport(nodes[i]);
+            }
+        }
+        
+        // Exécuter le reste
+        for (int i = 0; i < node_count; i++) {
+            if (nodes[i] && nodes[i]->type != NODE_IMPORT) {
+                execute(nodes[i]);
+            }
+        }
+        
+        // Cleanup
         for (int i = 0; i < node_count; i++) {
             if (nodes[i]) {
-                // Éviter de réexécuter les imports dans le module importé
-                // pour éviter les boucles infinies
-                if (nodes[i]->type == NODE_IMPORT) {
-                    // Marquer les variables exportées
-                    printf(CYAN "[MODULE]" RESET " Skipping imports in imported module\n");
-                } else {
-                    // Exécuter normalement
-                    // (Note: l'exécution complète nécessiterait une fonction execute() séparée)
-                }
                 free(nodes[i]);
             }
         }
@@ -630,8 +859,10 @@ static void importModule(const char* module_name, const char* from_package) {
     // Restaurer l'état
     free(current_module);
     free(current_package);
+    free(current_dir);
     current_module = old_module;
     current_package = old_package;
+    current_dir = old_dir;
     
     free(source);
     free(module_path);
@@ -686,12 +917,15 @@ static void execute(ASTNode* node) {
                         var->is_string = false;
                         var->value.float_val = evalFloat(node->left);
                         
-                        char value_str[32];
-                        sprintf(value_str, "%.2f", var->value.float_val);
+                        char value_str[100];
+                        char* str_val = evalString(node->left);
+                        strncpy(value_str, str_val, 99);
+                        value_str[99] = '\0';
                         addToDBVar(var->name, var_type, var->size_bytes, value_str, true, var->module);
+                        free(str_val);
                         
-                        printf(GREEN "[DECL]" RESET " %s %s = %.2f (%d bytes) [%s]\n", 
-                               getTypeName(var_type), var->name, var->value.float_val, 
+                        printf(GREEN "[DECL]" RESET " %s %s = %s (%d bytes) [%s]\n", 
+                               getTypeName(var_type), var->name, value_str, 
                                var->size_bytes, var->module ? var->module : "global");
                     }
                     else if (node->left->type == NODE_BOOL) {
@@ -755,15 +989,22 @@ static void execute(ASTNode* node) {
                         vars[idx].is_float = false;
                         vars[idx].value.str_val = str_copy(node->left->data.str_val);
                         updateDBVar(node->data.name, vars[idx].value.str_val);
+                        
+                        printf(CYAN "[ASSIGN]" RESET " %s = \"%s\"\n", node->data.name, vars[idx].value.str_val);
                     }
                     else if (node->left->type == NODE_FLOAT) {
                         vars[idx].is_float = true;
                         vars[idx].is_string = false;
                         vars[idx].value.float_val = evalFloat(node->left);
                         
-                        char value_str[32];
-                        sprintf(value_str, "%.2f", vars[idx].value.float_val);
+                        char value_str[100];
+                        char* str_val = evalString(node->left);
+                        strncpy(value_str, str_val, 99);
+                        value_str[99] = '\0';
                         updateDBVar(node->data.name, value_str);
+                        free(str_val);
+                        
+                        printf(CYAN "[ASSIGN]" RESET " %s = %s\n", node->data.name, value_str);
                     }
                     else if (node->left->type == NODE_BOOL) {
                         vars[idx].is_float = false;
@@ -771,6 +1012,9 @@ static void execute(ASTNode* node) {
                         vars[idx].value.int_val = node->left->data.bool_val ? 1 : 0;
                         
                         updateDBVar(node->data.name, node->left->data.bool_val ? "true" : "false");
+                        
+                        printf(CYAN "[ASSIGN]" RESET " %s = %s\n", node->data.name, 
+                               node->left->data.bool_val ? "true" : "false");
                     }
                     else {
                         vars[idx].is_float = false;
@@ -780,15 +1024,8 @@ static void execute(ASTNode* node) {
                         char value_str[32];
                         sprintf(value_str, "%lld", vars[idx].value.int_val);
                         updateDBVar(node->data.name, value_str);
-                    }
-                    
-                    printf(CYAN "[ASSIGN]" RESET " %s = ", node->data.name);
-                    if (vars[idx].is_string) {
-                        printf("\"%s\"\n", vars[idx].value.str_val);
-                    } else if (vars[idx].is_float) {
-                        printf("%.2f\n", vars[idx].value.float_val);
-                    } else {
-                        printf("%lld\n", vars[idx].value.int_val);
+                        
+                        printf(CYAN "[ASSIGN]" RESET " %s = %lld\n", node->data.name, vars[idx].value.int_val);
                     }
                 }
             } else {
@@ -922,7 +1159,9 @@ static void execute(ASTNode* node) {
         case NODE_BINARY: {
             // Évaluation directe d'une expression binaire
             double result = evalFloat(node);
-            printf("%.2f\n", result);
+            char* str = evalString(node);
+            printf("%s\n", str);
+            free(str);
             break;
         }
             
@@ -953,8 +1192,10 @@ static void cleanupPackages() {
     package_count = 0;
     if (current_module) free(current_module);
     if (current_package) free(current_package);
+    if (current_dir) free(current_dir);
     current_module = NULL;
     current_package = NULL;
+    current_dir = NULL;
 }
 
 // ======================================================
@@ -973,7 +1214,26 @@ static void run(const char* source, const char* filename) {
     if (current_module) free(current_module);
     current_module = strdup(filename);
     
-    // Chercher d'abord la fonction main
+    // Set current directory based on filename
+    if (current_dir) free(current_dir);
+    char* file_copy = strdup(filename);
+    char* last_slash = strrchr(file_copy, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        current_dir = strdup(file_copy);
+    } else {
+        current_dir = strdup(".");
+    }
+    free(file_copy);
+    
+    // Exécuter d'abord les imports
+    for (int i = 0; i < count; i++) {
+        if (nodes[i] && nodes[i]->type == NODE_IMPORT) {
+            executeImport(nodes[i]);
+        }
+    }
+    
+    // Chercher et exécuter main() si elle existe
     ASTNode* main_node = NULL;
     for (int i = 0; i < count; i++) {
         if (nodes[i] && nodes[i]->type == NODE_MAIN) {
@@ -983,11 +1243,17 @@ static void run(const char* source, const char* filename) {
     }
     
     if (main_node) {
+        printf(CYAN "\n[EXEC]" RESET " Starting main()...\n");
+        for (int i = 0; i < 60; i++) printf("=");
+        printf("\n");
+        
         execute(main_node);
+        
+        printf("\n" CYAN "[EXEC]" RESET " main() finished successfully\n");
     } else {
-        // Exécuter toutes les déclarations dans l'ordre
+        // Exécuter toutes les déclarations dans l'ordre (sauf les imports déjà faits)
         for (int i = 0; i < count; i++) {
-            if (nodes[i]) {
+            if (nodes[i] && nodes[i]->type != NODE_IMPORT) {
                 execute(nodes[i]);
             }
         }
@@ -1045,7 +1311,8 @@ static void repl() {
     printf("  " YELLOW "net y = 20.5;" RESET "\n");
     printf("  " YELLOW "print(x + y);" RESET "\n");
     printf("  " YELLOW "if (x > 5) print(\"x is big\");" RESET "\n");
-    printf("  " YELLOW "import \"math\" from \"stdlib\";" RESET "\n");
+    printf("  " YELLOW "import \"./file.swf\";" RESET "\n");
+    printf("  " YELLOW "import \"../module\";" RESET "\n");
     printf("  " YELLOW "export myVar as \"publicVar\";" RESET "\n");
     printf("\n");
     
