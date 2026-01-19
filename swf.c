@@ -9,11 +9,10 @@
 extern ASTNode** parse(const char* source, int* count);
 
 // ======================================================
-// [SECTION] VM STATE
+// [SECTION] VM STATE - SIMPLIFIÉ
 // ======================================================
 typedef struct {
     char name[100];
-    TokenKind type;
     int size_bytes;
     union {
         int64_t int_val;
@@ -23,160 +22,23 @@ typedef struct {
     } value;
     bool is_float;
     bool is_initialized;
-    bool is_constant;
     int scope_level;
 } Variable;
 
-typedef struct {
-    Variable vars[1000];
-    int count;
-    char* import_path;
-    char* current_package;
-    char* current_module;
-    int scope_level;
-} VM;
-
-static VM vm = {0};
+static Variable vars[100];
+static int var_count = 0;
+static int scope_level = 0;
 
 // ======================================================
-// [SECTION] SYMBOL TABLE
-// ======================================================
-static Scope* current_scope = NULL;
-
-static Scope* createScope(int level) {
-    Scope* scope = malloc(sizeof(Scope));
-    if (scope) {
-        scope->level = level;
-        scope->symbols = NULL;
-        scope->parent = current_scope;
-    }
-    return scope;
-}
-
-static void enterScope() {
-    vm.scope_level++;
-    Scope* new_scope = createScope(vm.scope_level);
-    if (new_scope) {
-        new_scope->parent = current_scope;
-        current_scope = new_scope;
-    }
-}
-
-static void exitScope() {
-    if (current_scope) {
-        Scope* old = current_scope;
-        current_scope = current_scope->parent;
-        
-        // Free symbols in old scope
-        Symbol* sym = old->symbols;
-        while (sym) {
-            Symbol* next = sym->next;
-            free(sym->name);
-            free(sym->data_type);
-            free(sym);
-            sym = next;
-        }
-        
-        free(old);
-        vm.scope_level--;
-    }
-}
-
-// ======================================================
-// [SECTION] DBVAR TABLE
-// ======================================================
-static DBVarTable dbvar_table = {0};
-
-static void initDBVarTable() {
-    dbvar_table.capacity = 100;
-    dbvar_table.entries = malloc(dbvar_table.capacity * sizeof(DBVarEntry));
-    dbvar_table.count = 0;
-}
-
-static void addDBVarEntry(const char* name, const char* type, int size_bytes, 
-                          const char* value_str, bool is_initialized) {
-    if (dbvar_table.count >= dbvar_table.capacity) {
-        dbvar_table.capacity *= 2;
-        dbvar_table.entries = realloc(dbvar_table.entries, 
-                                     dbvar_table.capacity * sizeof(DBVarEntry));
-    }
-    
-    DBVarEntry* entry = &dbvar_table.entries[dbvar_table.count++];
-    entry->name = str_copy(name);
-    entry->type = str_copy(type);
-    entry->size_bytes = size_bytes;
-    entry->value_str = str_copy(value_str);
-    entry->is_initialized = is_initialized;
-    entry->line = 0;
-    entry->scope = vm.scope_level;
-}
-
-static void displayDBVar() {
-    printf("\n" CYAN "╔══════════════════════════════════════════════════════════════╗\n");
-    printf("║                    TABLE DES VARIABLES (dbvar)                 ║\n");
-    printf("╠══════════════════════════════════════════════════════════════╣\n");
-    printf("║  Type     │ Nom         │ Taille     │ Valeur       │ Init   ║\n");
-    printf("╠══════════════════════════════════════════════════════════════╣\n");
-    
-    for (int i = 0; i < dbvar_table.count; i++) {
-        DBVarEntry* entry = &dbvar_table.entries[i];
-        
-        printf("║ %-9s │ %-11s │ %-10d │ %-12s │ %-6s ║\n",
-               entry->type,
-               entry->name,
-               entry->size_bytes,
-               entry->value_str,
-               entry->is_initialized ? "✓" : "✗");
-    }
-    
-    printf("╚══════════════════════════════════════════════════════════════╝\n" RESET);
-}
-
-static void freeDBVarTable() {
-    for (int i = 0; i < dbvar_table.count; i++) {
-        free(dbvar_table.entries[i].name);
-        free(dbvar_table.entries[i].type);
-        free(dbvar_table.entries[i].value_str);
-    }
-    free(dbvar_table.entries);
-    dbvar_table.count = 0;
-    dbvar_table.capacity = 0;
-}
-
-// ======================================================
-// [SECTION] VARIABLE SIZE MANAGEMENT
+// [SECTION] HELPER FUNCTIONS
 // ======================================================
 static int calculateVariableSize(TokenKind type) {
     switch (type) {
-        case TK_VAR:
-            return (rand() % 5) + 1; // 1-5 bytes
-        
-        case TK_NET:
-            return (rand() % 8) + 1; // 1-8 bytes
-        
-        case TK_CLOG:
-            return (rand() % 25) + 1; // 1-25 bytes
-        
-        case TK_DOS:
-            return (rand() % 1024) + 1; // 1-1024 bytes
-        
-        case TK_SEL:
-            return (rand() % 128) + 1; // 1-128 bytes
-        
-        case TK_TYPE_INT:
-            return sizeof(int64_t);
-        
-        case TK_TYPE_FLOAT:
-            return sizeof(double);
-        
-        case TK_TYPE_BOOL:
-            return sizeof(bool);
-        
-        case TK_TYPE_STR:
-            return 64; // Default string size
-        
-        default:
-            return 4; // Default size
+        case TK_VAR: return (rand() % 5) + 1; // 1-5 bytes
+        case TK_NET: return (rand() % 8) + 1; // 1-8 bytes
+        case TK_CLOG: return (rand() % 25) + 1; // 1-25 bytes
+        case TK_DOS: return (rand() % 1024) + 1; // 1-1024 bytes
+        default: return 4;
     }
 }
 
@@ -187,82 +49,13 @@ static const char* getTypeName(TokenKind type) {
         case TK_CLOG: return "clog";
         case TK_DOS: return "dos";
         case TK_SEL: return "sel";
-        case TK_TYPE_INT: return "int";
-        case TK_TYPE_FLOAT: return "float";
-        case TK_TYPE_STR: return "string";
-        case TK_TYPE_BOOL: return "bool";
         default: return "unknown";
     }
 }
 
-// ======================================================
-// [SECTION] GLOBAL VARIABLES
-// ======================================================
-typedef struct {
-    char name[100];
-    union {
-        int64_t int_val;
-        double float_val;
-    } value;
-    bool is_float;
-    char* module;
-} GlobalVariable;
-
-static GlobalVariable global_vars[500];
-static int global_var_count = 0;
-
-static int findGlobalVar(const char* name) {
-    for (int i = 0; i < global_var_count; i++) {
-        if (strcmp(global_vars[i].name, name) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-static void setGlobalVar(const char* name, double value, bool is_float, const char* module) {
-    int idx = findGlobalVar(name);
-    if (idx >= 0) {
-        global_vars[idx].value.float_val = value;
-        global_vars[idx].is_float = is_float;
-    } else {
-        if (global_var_count < 500) {
-            strncpy(global_vars[global_var_count].name, name, 99);
-            global_vars[global_var_count].name[99] = '\0';
-            global_vars[global_var_count].value.float_val = value;
-            global_vars[global_var_count].is_float = is_float;
-            global_vars[global_var_count].module = module ? str_copy(module) : NULL;
-            global_var_count++;
-        }
-    }
-}
-
-// ======================================================
-// [SECTION] HELPER FUNCTIONS
-// ======================================================
-static char* my_strdup(const char* s) {
-    if (!s) return NULL;
-    size_t len = strlen(s);
-    char* d = malloc(len + 1);
-    if (d) strcpy(d, s);
-    return d;
-}
-
-static void setImportPath(const char* path) {
-    if (vm.import_path) free(vm.import_path);
-    vm.import_path = my_strdup(path);
-}
-
-static void setCurrentPackage(const char* package) {
-    if (vm.current_package) free(vm.current_package);
-    vm.current_package = my_strdup(package);
-}
-
 static int findVar(const char* name) {
-    // Search from current scope up
-    for (int i = vm.count - 1; i >= 0; i--) {
-        if (strcmp(vm.vars[i].name, name) == 0 && 
-            vm.vars[i].scope_level <= vm.scope_level) {
+    for (int i = var_count - 1; i >= 0; i--) {
+        if (strcmp(vars[i].name, name) == 0) {
             return i;
         }
     }
@@ -288,23 +81,12 @@ static double evalFloat(ASTNode* node) {
         case NODE_IDENT: {
             int idx = findVar(node->data.name);
             if (idx >= 0) {
-                if (vm.vars[idx].is_float) {
-                    return vm.vars[idx].value.float_val;
+                if (vars[idx].is_float) {
+                    return vars[idx].value.float_val;
                 } else {
-                    return (double)vm.vars[idx].value.int_val;
+                    return (double)vars[idx].value.int_val;
                 }
             }
-            
-            // Check global vars
-            idx = findGlobalVar(node->data.name);
-            if (idx >= 0) {
-                if (global_vars[idx].is_float) {
-                    return global_vars[idx].value.float_val;
-                } else {
-                    return (double)((int)global_vars[idx].value.float_val);
-                }
-            }
-            
             printf(RED "[ERROR]" RESET " Undefined variable: %s\n", node->data.name);
             return 0.0;
         }
@@ -319,17 +101,7 @@ static double evalFloat(ASTNode* node) {
                 case TK_MULT: return left * right;
                 case TK_DIV: return right != 0 ? left / right : 0;
                 case TK_MOD: return right != 0 ? fmod(left, right) : 0;
-                case TK_POW: return pow(left, right);
                 default: return 0.0;
-            }
-        }
-            
-        case NODE_UNARY: {
-            double operand = evalFloat(node->left);
-            switch (node->op_type) {
-                case TK_MINUS: return -operand;
-                case TK_NOT: return !operand;
-                default: return operand;
             }
         }
             
@@ -341,44 +113,51 @@ static double evalFloat(ASTNode* node) {
 static char* evalString(ASTNode* node) {
     if (!node) return str_copy("");
     
+    char* result = NULL;
+    
     switch (node->type) {
         case NODE_STRING:
-            return str_copy(node->data.str_val);
+            result = str_copy(node->data.str_val);
+            break;
             
         case NODE_INT: {
-            char* str = malloc(32);
-            sprintf(str, "%lld", node->data.int_val);
-            return str;
+            result = malloc(32);
+            sprintf(result, "%lld", node->data.int_val);
+            break;
         }
             
         case NODE_FLOAT: {
-            char* str = malloc(32);
-            sprintf(str, "%.2f", node->data.float_val);
-            return str;
+            result = malloc(32);
+            sprintf(result, "%.2f", node->data.float_val);
+            break;
         }
             
         case NODE_BOOL:
-            return str_copy(node->data.bool_val ? "true" : "false");
+            result = str_copy(node->data.bool_val ? "true" : "false");
+            break;
             
         case NODE_IDENT: {
             int idx = findVar(node->data.name);
             if (idx >= 0) {
-                if (vm.vars[idx].is_float) {
-                    char* str = malloc(32);
-                    sprintf(str, "%.2f", vm.vars[idx].value.float_val);
-                    return str;
+                if (vars[idx].is_float) {
+                    result = malloc(32);
+                    sprintf(result, "%.2f", vars[idx].value.float_val);
                 } else {
-                    char* str = malloc(32);
-                    sprintf(str, "%lld", vm.vars[idx].value.int_val);
-                    return str;
+                    result = malloc(32);
+                    sprintf(result, "%lld", vars[idx].value.int_val);
                 }
+            } else {
+                result = str_copy("undefined");
             }
-            return str_copy("undefined");
+            break;
         }
             
         default:
-            return str_copy("");
+            result = str_copy("");
+            break;
     }
+    
+    return result;
 }
 
 // ======================================================
@@ -401,28 +180,18 @@ static void execute(ASTNode* node) {
             else if (node->type == NODE_SEL_DECL) var_type = TK_SEL;
             else if (node->type == NODE_CONST_DECL) var_type = TK_CONST;
             
-            int idx = findVar(node->data.name);
-            if (idx >= 0 && vm.vars[idx].scope_level == vm.scope_level) {
-                printf(RED "[ERROR]" RESET " Variable '%s' already declared in this scope\n", 
-                       node->data.name);
-                return;
-            }
-            
-            if (vm.count < 1000) {
-                Variable* var = &vm.vars[vm.count];
+            if (var_count < 100) {
+                Variable* var = &vars[var_count];
                 strncpy(var->name, node->data.name, 99);
                 var->name[99] = '\0';
-                var->type = var_type;
                 var->size_bytes = calculateVariableSize(var_type);
-                var->scope_level = vm.scope_level;
-                var->is_constant = (var_type == TK_CONST);
+                var->scope_level = scope_level;
                 
                 if (node->left) {
                     var->is_initialized = true;
                     double val = evalFloat(node->left);
                     
-                    if (node->left->type == NODE_FLOAT || 
-                        node->left->type == NODE_STRING) {
+                    if (node->left->type == NODE_FLOAT) {
                         var->is_float = true;
                         var->value.float_val = val;
                     } else {
@@ -430,95 +199,42 @@ static void execute(ASTNode* node) {
                         var->value.int_val = (int64_t)val;
                     }
                     
-                    // Add to DBVar table
-                    char value_str[32];
+                    printf(GREEN "[DECL]" RESET " %s %s = ", 
+                           getTypeName(var_type), var->name);
                     if (var->is_float) {
-                        sprintf(value_str, "%.2f", var->value.float_val);
+                        printf("%.2f", var->value.float_val);
                     } else {
-                        sprintf(value_str, "%lld", var->value.int_val);
+                        printf("%lld", var->value.int_val);
                     }
-                    
-                    addDBVarEntry(var->name, getTypeName(var_type), 
-                                 var->size_bytes, value_str, true);
-                    
-                    // Set global variable
-                    setGlobalVar(node->data.name, val, var->is_float, 
-                                vm.current_module);
+                    printf(" (%d bytes)\n", var->size_bytes);
                 } else {
                     var->is_initialized = false;
                     var->is_float = false;
                     var->value.int_val = 0;
                     
-                    addDBVarEntry(var->name, getTypeName(var_type), 
-                                 var->size_bytes, "uninitialized", false);
+                    printf(GREEN "[DECL]" RESET " %s %s (uninitialized, %d bytes)\n", 
+                           getTypeName(var_type), var->name, var->size_bytes);
                 }
                 
-                vm.count++;
-                printf(GREEN "[DECL]" RESET " %s %s declared (%d bytes)\n", 
-                       getTypeName(var_type), var->name, var->size_bytes);
-            }
-            break;
-        }
-            
-        case NODE_ASSIGN: {
-            int idx = findVar(node->data.name);
-            if (idx >= 0) {
-                if (vm.vars[idx].is_constant) {
-                    printf(RED "[ERROR]" RESET " Cannot assign to constant '%s'\n", 
-                           node->data.name);
-                    return;
-                }
-                
-                if (node->left) {
-                    vm.vars[idx].is_initialized = true;
-                    double val = evalFloat(node->left);
-                    
-                    if (node->left->type == NODE_FLOAT) {
-                        vm.vars[idx].is_float = true;
-                        vm.vars[idx].value.float_val = val;
-                    } else {
-                        vm.vars[idx].is_float = false;
-                        vm.vars[idx].value.int_val = (int64_t)val;
-                    }
-                    
-                    // Update DBVar table
-                    for (int i = 0; i < dbvar_table.count; i++) {
-                        if (strcmp(dbvar_table.entries[i].name, node->data.name) == 0) {
-                            free(dbvar_table.entries[i].value_str);
-                            char value_str[32];
-                            if (vm.vars[idx].is_float) {
-                                sprintf(value_str, "%.2f", vm.vars[idx].value.float_val);
-                            } else {
-                                sprintf(value_str, "%lld", vm.vars[idx].value.int_val);
-                            }
-                            dbvar_table.entries[i].value_str = str_copy(value_str);
-                            dbvar_table.entries[i].is_initialized = true;
-                            break;
-                        }
-                    }
-                    
-                    // Update global variable
-                    setGlobalVar(node->data.name, val, vm.vars[idx].is_float, 
-                                vm.current_module);
-                    
-                    printf(CYAN "[ASSIGN]" RESET " %s = ", node->data.name);
-                    if (vm.vars[idx].is_float) {
-                        printf("%.2f\n", vm.vars[idx].value.float_val);
-                    } else {
-                        printf("%lld\n", vm.vars[idx].value.int_val);
-                    }
-                }
-            } else {
-                printf(RED "[ERROR]" RESET " Variable '%s' not found\n", node->data.name);
+                var_count++;
             }
             break;
         }
             
         case NODE_PRINT: {
             if (node->left) {
-                char* str = evalString(node->left);
-                printf("%s", str);
-                free(str);
+                if (node->left->type == NODE_BINARY && node->left->op_type == TK_CONCAT) {
+                    // Gestion de la concaténation
+                    char* left_str = evalString(node->left->left);
+                    char* right_str = evalString(node->left->right);
+                    printf("%s%s", left_str, right_str);
+                    free(left_str);
+                    free(right_str);
+                } else {
+                    char* str = evalString(node->left);
+                    printf("%s", str);
+                    free(str);
+                }
             }
             printf("\n");
             break;
@@ -527,7 +243,7 @@ static void execute(ASTNode* node) {
         case NODE_SIZEOF: {
             int idx = findVar(node->data.size_info.var_name);
             if (idx >= 0) {
-                printf("%d bytes", vm.vars[idx].size_bytes);
+                printf("%d bytes", vars[idx].size_bytes);
             } else {
                 printf(RED "[ERROR]" RESET " Variable '%s' not found\n", 
                        node->data.size_info.var_name);
@@ -535,9 +251,33 @@ static void execute(ASTNode* node) {
             break;
         }
             
-        case NODE_DBVAR:
-            displayDBVar();
+        case NODE_DBVAR: {
+            printf(CYAN "\n╔══════════════════════════════════════════════════════════════╗\n");
+            printf("║                    TABLE DES VARIABLES                    ║\n");
+            printf("╠══════════════════════════════════════════════════════════════╣\n");
+            printf("║  Type   │ Nom         │ Taille     │ Valeur       │ Init   ║\n");
+            printf("╠══════════════════════════════════════════════════════════════╣\n");
+            
+            for (int i = 0; i < var_count; i++) {
+                Variable* var = &vars[i];
+                const char* type_str = getTypeName(TK_VAR); // Simplifié
+                
+                printf("║ %-7s │ %-11s │ %-10d │ ", type_str, var->name, var->size_bytes);
+                
+                if (var->is_initialized) {
+                    if (var->is_float) {
+                        printf("%-12.2f │ %-6s ║\n", var->value.float_val, "✓");
+                    } else {
+                        printf("%-12lld │ %-6s ║\n", var->value.int_val, "✓");
+                    }
+                } else {
+                    printf("N/A         │ %-6s ║\n", "✗");
+                }
+            }
+            
+            printf("╚══════════════════════════════════════════════════════════════╝\n" RESET);
             break;
+        }
             
         case NODE_IF: {
             double condition = evalFloat(node->left);
@@ -556,37 +296,26 @@ static void execute(ASTNode* node) {
             break;
         }
             
-        case NODE_FOR: {
-            // Initializer
-            if (node->left) {
-                execute(node->left);
+        case NODE_BLOCK: {
+            scope_level++;
+            ASTNode* current = node->left;
+            while (current) {
+                execute(current);
+                current = current->right;
             }
-            
-            // Condition (stored in extra)
-            while (node->extra && evalFloat(node->extra) != 0) {
-                // Body
-                execute(node->right);
-                
-                // Increment (stored in third)
-                if (node->third) {
-                    execute(node->third);
-                }
-            }
+            scope_level--;
             break;
         }
             
-        case NODE_BLOCK:
-            enterScope();
+        case NODE_MAIN: {
+            printf(CYAN "\n[EXEC]" RESET " Starting main()...\n");
             if (node->left) execute(node->left);
-            if (node->right) execute(node->right);
-            exitScope();
+            printf(CYAN "[EXEC]" RESET " main() finished\n");
             break;
-            
-        case NODE_RETURN:
-            // TODO: Implement return
-            break;
+        }
             
         default:
+            // Ignorer les autres types de nœuds pour l'instant
             break;
     }
 }
@@ -594,15 +323,12 @@ static void execute(ASTNode* node) {
 // ======================================================
 // [SECTION] MAIN EXECUTION FUNCTION
 // ======================================================
-static void run(const char* source, const char* filename) {
-    // Initialize DBVar table
-    initDBVarTable();
-    
+static void run(const char* source) {
     int count = 0;
     ASTNode** nodes = parse(source, &count);
     
     if (nodes) {
-        // Find and execute main function first
+        // Chercher d'abord la fonction main
         ASTNode* main_node = NULL;
         for (int i = 0; i < count; i++) {
             if (nodes[i] && nodes[i]->type == NODE_MAIN) {
@@ -612,10 +338,9 @@ static void run(const char* source, const char* filename) {
         }
         
         if (main_node) {
-            printf(CYAN "[EXEC]" RESET " Starting main()...\n");
             execute(main_node);
         } else {
-            // Execute all nodes in order
+            // Exécuter toutes les déclarations dans l'ordre
             for (int i = 0; i < count; i++) {
                 if (nodes[i]) {
                     execute(nodes[i]);
@@ -626,29 +351,29 @@ static void run(const char* source, const char* filename) {
         // Cleanup
         for (int i = 0; i < count; i++) {
             if (nodes[i]) {
-                // Free AST node
-                // TODO: Implement proper AST node cleanup
+                // Libérer la mémoire du nœud
+                if (nodes[i]->data.name) free(nodes[i]->data.name);
+                if (nodes[i]->data.str_val) free(nodes[i]->data.str_val);
                 free(nodes[i]);
             }
         }
         free(nodes);
     }
-    
-    // Free DBVar table
-    freeDBVarTable();
 }
 
 // ======================================================
 // [SECTION] REPL
 // ======================================================
 static void repl() {
-    printf("                         SwiftFlow v2.0 - REPL Mode                  ║\n");
-
+    printf(GREEN "╔══════════════════════════════════════════════════════════════╗\n");
+    printf("║                   SwiftFlow v2.0 - REPL Mode                  ║\n");
+    printf("║          Types CLAIR & SYM Fusion - Complete Language         ║\n");
+    printf("╚══════════════════════════════════════════════════════════════╝\n" RESET);
     printf("Commands: exit, dbvar, clear\n\n");
     
     char line[1024];
     while (1) {
-        printf("swiftflow> ");
+        printf("swift> ");
         if (!fgets(line, sizeof(line), stdin)) break;
         
         line[strcspn(line, "\n")] = 0;
@@ -659,23 +384,44 @@ static void repl() {
             continue;
         }
         if (strcmp(line, "dbvar") == 0) {
-            displayDBVar();
+            // Afficher la table des variables
+            printf(CYAN "\n╔══════════════════════════════════════════════════════════════╗\n");
+            printf("║                    TABLE DES VARIABLES                    ║\n");
+            printf("╠══════════════════════════════════════════════════════════════╣\n");
+            printf("║  Type   │ Nom         │ Taille     │ Valeur       │ Init   ║\n");
+            printf("╠══════════════════════════════════════════════════════════════╣\n");
+            
+            for (int i = 0; i < var_count; i++) {
+                Variable* var = &vars[i];
+                const char* type_str = getTypeName(TK_VAR);
+                
+                printf("║ %-7s │ %-11s │ %-10d │ ", type_str, var->name, var->size_bytes);
+                
+                if (var->is_initialized) {
+                    if (var->is_float) {
+                        printf("%-12.2f │ %-6s ║\n", var->value.float_val, "✓");
+                    } else {
+                        printf("%-12lld │ %-6s ║\n", var->value.int_val, "✓");
+                    }
+                } else {
+                    printf("N/A         │ %-6s ║\n", "✗");
+                }
+            }
+            
+            printf("╚══════════════════════════════════════════════════════════════╝\n" RESET);
             continue;
         }
         
-        run(line, "REPL");
+        run(line);
     }
-    
-    // Cleanup
-    if (vm.import_path) free(vm.import_path);
-    if (vm.current_package) free(vm.current_package);
-    if (vm.current_module) free(vm.current_module);
 }
 
 // ======================================================
 // [SECTION] MAIN
 // ======================================================
 int main(int argc, char* argv[]) {
+    srand(time(NULL)); // Pour les tailles aléatoires
+    
     if (argc < 2) {
         repl();
     } else {
@@ -696,13 +442,8 @@ int main(int argc, char* argv[]) {
         
         printf(GREEN "[SUCCESS]" RESET ">> Executing %s\n\n", argv[1]);
         
-        run(source, argv[1]);
+        run(source);
         free(source);
-        
-        // Cleanup
-        if (vm.import_path) free(vm.import_path);
-        if (vm.current_package) free(vm.current_package);
-        if (vm.current_module) free(vm.current_module);
     }
     
     return 0;
