@@ -132,7 +132,7 @@ typedef enum {
     TK_DOC_RETURN, TK_DOC_THROWS,
     
     // End markers
-    TK_EOF, TK_ERROR, TK_WARNING, TK_INFO
+    TK_ERROR, TK_WARNING, TK_INFO
 } TokenKind;
 
 // Token structure
