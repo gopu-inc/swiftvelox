@@ -203,7 +203,6 @@ static Token string(char quote_char) {
     if (str) {
         // Copy string content (skip quotes)
         const char* src = lexer.start + 1;
-        char* dest = str;
         int dest_idx = 0;
         
         for (int i = 0; i < length; i++) {
@@ -374,8 +373,9 @@ static Token identifier() {
 // ======================================================
 // [SECTION] OPERATOR LEXING
 // ======================================================
-static Token operator() {
+static Token operatorLexer() {
     char c = peek();
+    char error_msg[32]; // Déclaré en haut de la fonction
     
     // Multi-character operators
     switch (c) {
@@ -526,7 +526,7 @@ static Token operator() {
             
         default:
             // Unknown character
-            char error_msg[32];
+            advance();
             snprintf(error_msg, sizeof(error_msg), "Unexpected character: '%c'", c);
             return errorToken(error_msg);
     }
@@ -561,7 +561,7 @@ Token scanToken() {
     }
     
     // Operators and punctuation
-    return operator();
+    return operatorLexer();
 }
 
 // ======================================================
@@ -623,6 +623,11 @@ const char* tokenKindToString(TokenKind kind) {
         case TK_DARROW: return "TK_DARROW";
         case TK_LDARROW: return "TK_LDARROW";
         case TK_RDARROW: return "TK_RDARROW";
+        
+        // Range
+        case TK_ELLIPSIS: return "TK_ELLIPSIS";
+        case TK_RANGE: return "TK_RANGE";
+        case TK_SCOPE: return "TK_SCOPE";
         
         // Punctuation
         case TK_LPAREN: return "TK_LPAREN";
