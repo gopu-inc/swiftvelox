@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <math.h>
 #include <time.h>
+#include <dirent.h>
 #include "common.h"
 
 extern ASTNode** parse(const char* source, int* count);
@@ -27,6 +28,8 @@ typedef struct {
     bool is_initialized;
     bool is_constant;
     int scope_level;
+    char* module;  // Module d'origine
+    bool is_exported;  // Si la variable est exportée
 } Variable;
 
 static Variable vars[500];
@@ -42,10 +45,33 @@ typedef struct {
     int size_bytes;
     char value_str[100];
     bool initialized;
+    char module[100];
 } DBVarEntry;
 
 static DBVarEntry dbvars[500];
 static int dbvar_count = 0;
+
+// ======================================================
+// [SECTION] PACKAGE SYSTEM
+// ======================================================
+typedef struct {
+    char alias[100];
+    char module_path[200];
+    char package_name[100];
+} ExportEntry;
+
+typedef struct {
+    char name[100];
+    ExportEntry exports[50];
+    int export_count;
+    bool loaded;
+} Package;
+
+static Package packages[50];
+static int package_count = 0;
+
+static char* current_module = NULL;
+static char* current_package = NULL;
 
 // ======================================================
 // [SECTION] HELPER FUNCTIONS
@@ -86,7 +112,7 @@ static int findVar(const char* name) {
 }
 
 static void addToDBVar(const char* name, TokenKind type, int size_bytes, 
-                       const char* value_str, bool initialized) {
+                       const char* value_str, bool initialized, const char* module) {
     if (dbvar_count < 500) {
         DBVarEntry* entry = &dbvars[dbvar_count++];
         strncpy(entry->name, name, 99);
@@ -101,6 +127,12 @@ static void addToDBVar(const char* name, TokenKind type, int size_bytes,
             strcpy(entry->value_str, "N/A");
         }
         entry->initialized = initialized;
+        if (module) {
+            strncpy(entry->module, module, 99);
+            entry->module[99] = '\0';
+        } else {
+            strcpy(entry->module, current_module ? current_module : "global");
+        }
     }
 }
 
@@ -115,6 +147,242 @@ static void updateDBVar(const char* name, const char* value_str) {
             break;
         }
     }
+}
+
+// ======================================================
+// [SECTION] PACKAGE MANAGEMENT
+// ======================================================
+static Package* findPackage(const char* name) {
+    for (int i = 0; i < package_count; i++) {
+        if (strcmp(packages[i].name, name) == 0) {
+            return &packages[i];
+        }
+    }
+    return NULL;
+}
+
+static Package* createPackage(const char* name) {
+    if (package_count >= 50) {
+        printf(RED "[ERROR]" RESET " Too many packages\n");
+        return NULL;
+    }
+    
+    Package* pkg = &packages[package_count++];
+    strncpy(pkg->name, name, 99);
+    pkg->name[99] = '\0';
+    pkg->export_count = 0;
+    pkg->loaded = false;
+    
+    return pkg;
+}
+
+static void addExportToPackage(const char* package_name, const char* alias, const char* module_path) {
+    Package* pkg = findPackage(package_name);
+    if (!pkg) {
+        pkg = createPackage(package_name);
+        if (!pkg) return;
+    }
+    
+    if (pkg->export_count >= 50) {
+        printf(RED "[ERROR]" RESET " Too many exports in package %s\n", package_name);
+        return;
+    }
+    
+    ExportEntry* exp = &pkg->exports[pkg->export_count++];
+    strncpy(exp->alias, alias, 99);
+    exp->alias[99] = '\0';
+    strncpy(exp->module_path, module_path, 199);
+    exp->module_path[199] = '\0';
+    strncpy(exp->package_name, package_name, 99);
+    exp->package_name[99] = '\0';
+    
+    printf(CYAN "[PACKAGE]" RESET " %s exports '%s' as '%s'\n", 
+           package_name, module_path, alias);
+}
+
+static char* findModulePath(const char* module_name, const char* from_package) {
+    char* path = NULL;
+    
+    // 1. Si from_package est spécifié, chercher dans le package
+    if (from_package) {
+        Package* pkg = findPackage(from_package);
+        if (pkg) {
+            for (int i = 0; i < pkg->export_count; i++) {
+                if (strcmp(pkg->exports[i].alias, module_name) == 0) {
+                    // Construire le chemin complet
+                    path = malloc(strlen("/usr/local/lib/swift/") + 
+                                 strlen(pkg->exports[i].package_name) + 
+                                 strlen(pkg->exports[i].module_path) + 10);
+                    if (path) {
+                        sprintf(path, "/usr/local/lib/swift/%s/%s", 
+                                pkg->exports[i].package_name, pkg->exports[i].module_path);
+                        printf(CYAN "[RESOLVE]" RESET " Found export: %s -> %s\n", module_name, path);
+                        return path;
+                    }
+                }
+            }
+        }
+    }
+    
+    // 2. Chercher dans le répertoire courant
+    if (!path) {
+        struct stat st;
+        // Essayer .swf
+        char local_path[300];
+        sprintf(local_path, "%s.swf", module_name);
+        if (stat(local_path, &st) == 0) {
+            path = strdup(local_path);
+            printf(CYAN "[RESOLVE]" RESET " Found local module: %s\n", path);
+            return path;
+        }
+        
+        // Essayer sans extension
+        if (stat(module_name, &st) == 0) {
+            path = strdup(module_name);
+            return path;
+        }
+    }
+    
+    // 3. Chercher dans /usr/local/lib/swift/
+    if (!path) {
+        char* base_path = "/usr/local/lib/swift/";
+        
+        // Si c'est un package (dossier)
+        char package_dir[300];
+        sprintf(package_dir, "%s%s/", base_path, module_name);
+        
+        struct stat st;
+        if (stat(package_dir, &st) == 0 && S_ISDIR(st.st_mode)) {
+            // Vérifier s'il y a un fichier .svlib
+            char svlib_path[350];
+            sprintf(svlib_path, "%s%s.svlib", package_dir, module_name);
+            
+            if (access(svlib_path, F_OK) == 0) {
+                path = strdup(svlib_path);
+                printf(CYAN "[PACKAGE]" RESET " Found package manifest: %s\n", path);
+                return path;
+            }
+            
+            // Sinon, chercher un fichier .swf avec le même nom
+            sprintf(svlib_path, "%s%s.swf", package_dir, module_name);
+            if (access(svlib_path, F_OK) == 0) {
+                path = strdup(svlib_path);
+                return path;
+            }
+        }
+        
+        // Essayer fichier simple
+        char module_path[300];
+        sprintf(module_path, "%s%s.swf", base_path, module_name);
+        if (access(module_path, F_OK) == 0) {
+            path = strdup(module_path);
+            printf(CYAN "[RESOLVE]" RESET " Found system module: %s\n", path);
+            return path;
+        }
+    }
+    
+    // 4. Si current_package est défini, chercher dedans
+    if (!path && current_package) {
+        char package_path[300];
+        sprintf(package_path, "/usr/local/lib/swift/%s/%s", current_package, module_name);
+        
+        if (access(package_path, F_OK) == 0) {
+            path = strdup(package_path);
+            return path;
+        }
+        
+        sprintf(package_path, "/usr/local/lib/swift/%s/%s.swf", current_package, module_name);
+        if (access(package_path, F_OK) == 0) {
+            path = strdup(package_path);
+            return path;
+        }
+    }
+    
+    printf(RED "[RESOLVE]" RESET " Module not found: %s\n", module_name);
+    return NULL;
+}
+
+static void loadPackage(const char* package_name) {
+    Package* pkg = findPackage(package_name);
+    if (pkg && pkg->loaded) {
+        return; // Déjà chargé
+    }
+    
+    char* manifest_path = findModulePath(package_name, NULL);
+    if (!manifest_path) {
+        printf(RED "[ERROR]" RESET " Cannot find package manifest for: %s\n", package_name);
+        return;
+    }
+    
+    // Vérifier si c'est un fichier .svlib
+    const char* ext = strrchr(manifest_path, '.');
+    if (!ext || strcmp(ext, ".svlib") != 0) {
+        printf(RED "[ERROR]" RESET " Not a package manifest: %s\n", manifest_path);
+        free(manifest_path);
+        return;
+    }
+    
+    FILE* f = fopen(manifest_path, "r");
+    if (!f) {
+        printf(RED "[ERROR]" RESET " Cannot open package manifest: %s\n", manifest_path);
+        free(manifest_path);
+        return;
+    }
+    
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    char* source = malloc(size + 1);
+    fread(source, 1, size, f);
+    source[size] = '\0';
+    fclose(f);
+    
+    printf(CYAN "[PACKAGE]" RESET " Loading package: %s\n", package_name);
+    
+    // Sauvegarder l'état courant
+    char* old_package = current_package ? strdup(current_package) : NULL;
+    char* old_module = current_module ? strdup(current_module) : NULL;
+    
+    // Définir le package courant
+    current_package = strdup(package_name);
+    current_module = strdup(package_name);
+    
+    // Exécuter le manifest
+    int node_count = 0;
+    ASTNode** nodes = parse(source, &node_count);
+    
+    if (nodes) {
+        for (int i = 0; i < node_count; i++) {
+            // Le manifest peut contenir des exports
+            if (nodes[i]) {
+                if (nodes[i]->type == NODE_EXPORT) {
+                    addExportToPackage(package_name, 
+                                      nodes[i]->data.export.alias,
+                                      nodes[i]->data.export.symbol);
+                }
+                free(nodes[i]);
+            }
+        }
+        free(nodes);
+    }
+    
+    // Marquer comme chargé
+    if (pkg) {
+        pkg->loaded = true;
+    } else {
+        pkg = createPackage(package_name);
+        if (pkg) pkg->loaded = true;
+    }
+    
+    // Restaurer l'état
+    free(current_package);
+    free(current_module);
+    current_package = old_package;
+    current_module = old_module;
+    
+    free(source);
+    free(manifest_path);
 }
 
 // ======================================================
@@ -252,6 +520,124 @@ static char* evalString(ASTNode* node) {
 }
 
 // ======================================================
+// [SECTION] MODULE IMPORT
+// ======================================================
+static void importModule(const char* module_name, const char* from_package);
+
+static void executeImport(ASTNode* node) {
+    if (!node) return;
+    
+    for (int i = 0; i < node->data.imports.module_count; i++) {
+        if (node->data.imports.modules[i]) {
+            importModule(node->data.imports.modules[i], node->data.imports.from_module);
+        }
+    }
+}
+
+static void importModule(const char* module_name, const char* from_package) {
+    printf(CYAN "[IMPORT]" RESET " Importing: %s", module_name);
+    if (from_package) printf(" from package: %s", from_package);
+    printf("\n");
+    
+    // Vérifier si c'est un wildcard
+    if (strcmp(module_name, "*") == 0 && from_package) {
+        // Charger tout le package
+        loadPackage(from_package);
+        return;
+    }
+    
+    // Charger le package si nécessaire
+    if (from_package) {
+        loadPackage(from_package);
+    }
+    
+    // Trouver le chemin du module
+    char* module_path = findModulePath(module_name, from_package);
+    if (!module_path) {
+        printf(RED "[ERROR]" RESET " Cannot find module: %s\n", module_name);
+        return;
+    }
+    
+    // Vérifier si c'est un package manifest
+    const char* ext = strrchr(module_path, '.');
+    if (ext && strcmp(ext, ".svlib") == 0) {
+        // C'est un package, le charger
+        loadPackage(module_name);
+        free(module_path);
+        return;
+    }
+    
+    // Ouvrir et exécuter le module
+    FILE* f = fopen(module_path, "r");
+    if (!f) {
+        printf(RED "[ERROR]" RESET " Cannot open module: %s\n", module_path);
+        free(module_path);
+        return;
+    }
+    
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    char* source = malloc(size + 1);
+    fread(source, 1, size, f);
+    source[size] = '\0';
+    fclose(f);
+    
+    // Sauvegarder l'état
+    char* old_module = current_module ? strdup(current_module) : NULL;
+    char* old_package = current_package ? strdup(current_package) : NULL;
+    
+    // Définir le module courant
+    current_module = strdup(module_name);
+    
+    // Extraire le nom du package du chemin si possible
+    char* path_copy = strdup(module_path);
+    char* last_slash = strrchr(path_copy, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        char* package_slash = strrchr(path_copy, '/');
+        if (package_slash) {
+            current_package = strdup(package_slash + 1);
+        }
+    }
+    free(path_copy);
+    
+    // Exécuter le module
+    printf(CYAN "[MODULE]" RESET " Executing module: %s\n", module_name);
+    
+    int node_count = 0;
+    ASTNode** nodes = parse(source, &node_count);
+    
+    if (nodes) {
+        for (int i = 0; i < node_count; i++) {
+            if (nodes[i]) {
+                // Éviter de réexécuter les imports dans le module importé
+                // pour éviter les boucles infinies
+                if (nodes[i]->type == NODE_IMPORT) {
+                    // Marquer les variables exportées
+                    printf(CYAN "[MODULE]" RESET " Skipping imports in imported module\n");
+                } else {
+                    // Exécuter normalement
+                    // (Note: l'exécution complète nécessiterait une fonction execute() séparée)
+                }
+                free(nodes[i]);
+            }
+        }
+        free(nodes);
+    }
+    
+    // Restaurer l'état
+    free(current_module);
+    free(current_package);
+    current_module = old_module;
+    current_package = old_package;
+    
+    free(source);
+    free(module_path);
+}
+
+// ======================================================
 // [SECTION] EXECUTION
 // ======================================================
 static void execute(ASTNode* node) {
@@ -279,6 +665,8 @@ static void execute(ASTNode* node) {
                 var->size_bytes = calculateVariableSize(var_type);
                 var->scope_level = scope_level;
                 var->is_constant = (var_type == TK_CONST);
+                var->module = current_module ? strdup(current_module) : NULL;
+                var->is_exported = false; // Par défaut
                 
                 if (node->left) {
                     var->is_initialized = true;
@@ -288,9 +676,10 @@ static void execute(ASTNode* node) {
                         var->is_float = false;
                         var->value.str_val = str_copy(node->left->data.str_val);
                         addToDBVar(var->name, var_type, var->size_bytes, 
-                                  var->value.str_val, true);
-                        printf(GREEN "[DECL]" RESET " %s %s = \"%s\" (%d bytes)\n", 
-                               getTypeName(var_type), var->name, var->value.str_val, var->size_bytes);
+                                  var->value.str_val, true, var->module);
+                        printf(GREEN "[DECL]" RESET " %s %s = \"%s\" (%d bytes) [%s]\n", 
+                               getTypeName(var_type), var->name, var->value.str_val, 
+                               var->size_bytes, var->module ? var->module : "global");
                     } 
                     else if (node->left->type == NODE_FLOAT) {
                         var->is_float = true;
@@ -299,10 +688,11 @@ static void execute(ASTNode* node) {
                         
                         char value_str[32];
                         sprintf(value_str, "%.2f", var->value.float_val);
-                        addToDBVar(var->name, var_type, var->size_bytes, value_str, true);
+                        addToDBVar(var->name, var_type, var->size_bytes, value_str, true, var->module);
                         
-                        printf(GREEN "[DECL]" RESET " %s %s = %.2f (%d bytes)\n", 
-                               getTypeName(var_type), var->name, var->value.float_val, var->size_bytes);
+                        printf(GREEN "[DECL]" RESET " %s %s = %.2f (%d bytes) [%s]\n", 
+                               getTypeName(var_type), var->name, var->value.float_val, 
+                               var->size_bytes, var->module ? var->module : "global");
                     }
                     else if (node->left->type == NODE_BOOL) {
                         var->is_float = false;
@@ -310,11 +700,12 @@ static void execute(ASTNode* node) {
                         var->value.int_val = node->left->data.bool_val ? 1 : 0;
                         
                         addToDBVar(var->name, var_type, var->size_bytes, 
-                                  node->left->data.bool_val ? "true" : "false", true);
+                                  node->left->data.bool_val ? "true" : "false", true, var->module);
                         
-                        printf(GREEN "[DECL]" RESET " %s %s = %s (%d bytes)\n", 
+                        printf(GREEN "[DECL]" RESET " %s %s = %s (%d bytes) [%s]\n", 
                                getTypeName(var_type), var->name, 
-                               node->left->data.bool_val ? "true" : "false", var->size_bytes);
+                               node->left->data.bool_val ? "true" : "false", 
+                               var->size_bytes, var->module ? var->module : "global");
                     }
                     else {
                         var->is_float = false;
@@ -323,10 +714,11 @@ static void execute(ASTNode* node) {
                         
                         char value_str[32];
                         sprintf(value_str, "%lld", var->value.int_val);
-                        addToDBVar(var->name, var_type, var->size_bytes, value_str, true);
+                        addToDBVar(var->name, var_type, var->size_bytes, value_str, true, var->module);
                         
-                        printf(GREEN "[DECL]" RESET " %s %s = %lld (%d bytes)\n", 
-                               getTypeName(var_type), var->name, var->value.int_val, var->size_bytes);
+                        printf(GREEN "[DECL]" RESET " %s %s = %lld (%d bytes) [%s]\n", 
+                               getTypeName(var_type), var->name, var->value.int_val, 
+                               var->size_bytes, var->module ? var->module : "global");
                     }
                 } else {
                     var->is_initialized = false;
@@ -334,10 +726,11 @@ static void execute(ASTNode* node) {
                     var->is_string = false;
                     var->value.int_val = 0;
                     
-                    addToDBVar(var->name, var_type, var->size_bytes, "uninitialized", false);
+                    addToDBVar(var->name, var_type, var->size_bytes, "uninitialized", false, var->module);
                     
-                    printf(GREEN "[DECL]" RESET " %s %s (uninitialized, %d bytes)\n", 
-                           getTypeName(var_type), var->name, var->size_bytes);
+                    printf(GREEN "[DECL]" RESET " %s %s (uninitialized, %d bytes) [%s]\n", 
+                           getTypeName(var_type), var->name, var->size_bytes, 
+                           var->module ? var->module : "global");
                 }
                 
                 var_count++;
@@ -426,27 +819,53 @@ static void execute(ASTNode* node) {
         }
             
         case NODE_DBVAR: {
-            printf(CYAN "\n╔════════════════════════════════════════════════════════════════════╗\n");
-            printf("║                   TABLE DES VARIABLES (dbvar)                    ║\n");
-            printf("╠════════════════════════════════════════════════════════════════════╣\n");
-            printf("║  Type    │ Nom          │ Taille     │ Valeur         │ Init     ║\n");
-            printf("╠════════════════════════════════════════════════════════════════════╣\n");
+            printf(CYAN "\n╔══════════════════════════════════════════════════════════════════════════════╗\n");
+            printf("║                   TABLE DES VARIABLES (dbvar)                              ║\n");
+            printf("╠══════════════════════════════════════════════════════════════════════════════╣\n");
+            printf("║  Type    │ Nom          │ Taille     │ Valeur         │ Init  │ Module     ║\n");
+            printf("╠══════════════════════════════════════════════════════════════════════════════╣\n");
             
             for (int i = 0; i < dbvar_count; i++) {
                 DBVarEntry* entry = &dbvars[i];
-                printf("║ %-8s │ %-12s │ %-10d │ %-14s │ %-8s ║\n",
+                printf("║ %-8s │ %-12s │ %-10d │ %-14s │ %-5s │ %-10s ║\n",
                        entry->type,
                        entry->name,
                        entry->size_bytes,
                        entry->value_str,
-                       entry->initialized ? "✓" : "✗");
+                       entry->initialized ? "✓" : "✗",
+                       entry->module);
             }
             
             if (dbvar_count == 0) {
-                printf("║                      No variables declared                        ║\n");
+                printf("║                      No variables declared                                    ║\n");
             }
             
-            printf("╚════════════════════════════════════════════════════════════════════╝\n" RESET);
+            printf("╚══════════════════════════════════════════════════════════════════════════════╝\n" RESET);
+            break;
+        }
+            
+        case NODE_IMPORT:
+            executeImport(node);
+            break;
+            
+        case NODE_EXPORT: {
+            // Marquer la variable comme exportée
+            int idx = findVar(node->data.export.symbol);
+            if (idx >= 0) {
+                vars[idx].is_exported = true;
+                printf(CYAN "[EXPORT]" RESET " Exporting variable: %s as %s\n", 
+                       node->data.export.symbol, node->data.export.alias);
+                
+                // Ajouter à la table d'export du package courant
+                if (current_package) {
+                    addExportToPackage(current_package, 
+                                      node->data.export.alias,
+                                      node->data.export.symbol);
+                }
+            } else {
+                printf(RED "[ERROR]" RESET " Cannot export undefined variable: %s\n", 
+                       node->data.export.symbol);
+            }
             break;
         }
             
@@ -469,10 +888,10 @@ static void execute(ASTNode* node) {
             
         case NODE_BLOCK: {
             scope_level++;
-            ASTNode* current = node->left;
-            while (current) {
-                execute(current);
-                current = current->right;
+            ASTNode* current_node = node->left;
+            while (current_node) {
+                execute(current_node);
+                current_node = current_node->right;
             }
             scope_level--;
             break;
@@ -520,6 +939,7 @@ static void cleanupVariables() {
         if (vars[i].is_string && vars[i].value.str_val) {
             free(vars[i].value.str_val);
         }
+        if (vars[i].module) free(vars[i].module);
     }
     var_count = 0;
     scope_level = 0;
@@ -529,10 +949,18 @@ static void cleanupDBVar() {
     dbvar_count = 0;
 }
 
+static void cleanupPackages() {
+    package_count = 0;
+    if (current_module) free(current_module);
+    if (current_package) free(current_package);
+    current_module = NULL;
+    current_package = NULL;
+}
+
 // ======================================================
 // [SECTION] MAIN EXECUTION FUNCTION
 // ======================================================
-static void run(const char* source) {
+static void run(const char* source, const char* filename) {
     int count = 0;
     ASTNode** nodes = parse(source, &count);
     
@@ -541,9 +969,9 @@ static void run(const char* source) {
         return;
     }
     
-    // Cleanup avant nouvelle exécution
-    cleanupVariables();
-    cleanupDBVar();
+    // Set current module name
+    if (current_module) free(current_module);
+    current_module = strdup(filename);
     
     // Chercher d'abord la fonction main
     ASTNode* main_node = NULL;
@@ -568,6 +996,28 @@ static void run(const char* source) {
     // Cleanup des nœuds AST
     for (int i = 0; i < count; i++) {
         if (nodes[i]) {
+            if (nodes[i]->type == NODE_IMPORT) {
+                for (int j = 0; j < nodes[i]->data.imports.module_count; j++) {
+                    free(nodes[i]->data.imports.modules[j]);
+                }
+                free(nodes[i]->data.imports.modules);
+                if (nodes[i]->data.imports.from_module) {
+                    free(nodes[i]->data.imports.from_module);
+                }
+            }
+            if (nodes[i]->type == NODE_EXPORT) {
+                free(nodes[i]->data.export.symbol);
+                free(nodes[i]->data.export.alias);
+            }
+            if (nodes[i]->type == NODE_STRING && nodes[i]->data.str_val) {
+                free(nodes[i]->data.str_val);
+            }
+            if (nodes[i]->type == NODE_IDENT && nodes[i]->data.name) {
+                free(nodes[i]->data.name);
+            }
+            if (nodes[i]->type == NODE_SIZEOF && nodes[i]->data.size_info.var_name) {
+                free(nodes[i]->data.size_info.var_name);
+            }
             free(nodes[i]);
         }
     }
@@ -588,12 +1038,15 @@ static void repl() {
     printf("  " CYAN "dbvar" RESET "     - Show variable table\n");
     printf("  " CYAN "clear" RESET "     - Clear screen\n");
     printf("  " CYAN "reset" RESET "     - Reset all variables\n");
+    printf("  " CYAN "packages" RESET "  - Show loaded packages\n");
     printf("\n");
     printf("Example statements:\n");
     printf("  " YELLOW "var x = 10;" RESET "\n");
     printf("  " YELLOW "net y = 20.5;" RESET "\n");
     printf("  " YELLOW "print(x + y);" RESET "\n");
     printf("  " YELLOW "if (x > 5) print(\"x is big\");" RESET "\n");
+    printf("  " YELLOW "import \"math\" from \"stdlib\";" RESET "\n");
+    printf("  " YELLOW "export myVar as \"publicVar\";" RESET "\n");
     printf("\n");
     
     char line[1024];
@@ -611,24 +1064,51 @@ static void repl() {
             continue;
         }
         if (strcmp(line, "dbvar") == 0) {
-            printf(CYAN "\n╔════════════════════════════════════════════════════════════════════╗\n");
-            printf("║                   TABLE DES VARIABLES (dbvar)                    ║\n");
-            printf("╠════════════════════════════════════════════════════════════════════╣\n");
-            printf("║  Type    │ Nom          │ Taille     │ Valeur         │ Init     ║\n");
-            printf("╠════════════════════════════════════════════════════════════════════╣\n");
+            printf(CYAN "\n╔══════════════════════════════════════════════════════════════════════════════╗\n");
+            printf("║                   TABLE DES VARIABLES (dbvar)                              ║\n");
+            printf("╠══════════════════════════════════════════════════════════════════════════════╣\n");
+            printf("║  Type    │ Nom          │ Taille     │ Valeur         │ Init  │ Module     ║\n");
+            printf("╠══════════════════════════════════════════════════════════════════════════════╣\n");
             
             for (int i = 0; i < dbvar_count; i++) {
                 DBVarEntry* entry = &dbvars[i];
-                printf("║ %-8s │ %-12s │ %-10d │ %-14s │ %-8s ║\n",
+                printf("║ %-8s │ %-12s │ %-10d │ %-14s │ %-5s │ %-10s ║\n",
                        entry->type,
                        entry->name,
                        entry->size_bytes,
                        entry->value_str,
-                       entry->initialized ? "✓" : "✗");
+                       entry->initialized ? "✓" : "✗",
+                       entry->module);
             }
             
             if (dbvar_count == 0) {
-                printf("║                      No variables declared                        ║\n");
+                printf("║                      No variables declared                                    ║\n");
+            }
+            
+            printf("╚══════════════════════════════════════════════════════════════════════════════╝\n" RESET);
+            continue;
+        }
+        if (strcmp(line, "packages") == 0) {
+            printf(CYAN "\n╔════════════════════════════════════════════════════════════════════╗\n");
+            printf("║                    LOADED PACKAGES                                ║\n");
+            printf("╠════════════════════════════════════════════════════════════════════╣\n");
+            
+            for (int i = 0; i < package_count; i++) {
+                Package* pkg = &packages[i];
+                printf("║ %-20s │ Exports: %-3d │ Loaded: %-5s ║\n",
+                       pkg->name,
+                       pkg->export_count,
+                       pkg->loaded ? "✓" : "✗");
+                
+                for (int j = 0; j < pkg->export_count; j++) {
+                    printf("║   └─ %-15s → %-30s ║\n",
+                           pkg->exports[j].alias,
+                           pkg->exports[j].module_path);
+                }
+            }
+            
+            if (package_count == 0) {
+                printf("║                 No packages loaded                              ║\n");
             }
             
             printf("╚════════════════════════════════════════════════════════════════════╝\n" RESET);
@@ -637,12 +1117,13 @@ static void repl() {
         if (strcmp(line, "reset") == 0) {
             cleanupVariables();
             cleanupDBVar();
-            printf(GREEN "[INFO]" RESET " All variables reset\n");
+            cleanupPackages();
+            printf(GREEN "[INFO]" RESET " All variables and packages reset\n");
             continue;
         }
         if (strlen(line) == 0) continue;
         
-        run(line);
+        run(line, "REPL");
     }
     
     printf(CYAN "\n[REPL]" RESET " Exiting SwiftFlow. Goodbye!\n");
@@ -692,6 +1173,7 @@ int main(int argc, char* argv[]) {
     printf(" |_____/|_|_|  |_|  \\__|_|   |_|\\___/ \\_/\\_/    \n");
     printf("                                                \n");
     printf("         v2.0 - Fusion CLAIR & SYM              \n");
+    printf("         Advanced Package System                \n");
     printf(RESET "\n");
     
     if (argc < 2) {
@@ -708,12 +1190,14 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < 60; i++) printf("=");
         printf("\n\n");
         
-        run(source);
+        run(source, argv[1]);
         free(source);
     }
     
     // Nettoyage final
     cleanupVariables();
+    cleanupDBVar();
+    cleanupPackages();
     
     return 0;
 }
