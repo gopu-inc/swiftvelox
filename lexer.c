@@ -15,22 +15,29 @@ typedef struct {
     int line;
     int column;
     int start_column;
+    Error* error;
 } Lexer;
 
 static Lexer lexer;
+static Token current_token;
+static Token previous_token;
+static Token peek_token;
+static bool has_peek = false;
 
 // ======================================================
 // [SECTION] LEXER UTILITIES
 // ======================================================
-void initLexer(const char* source) {
+void init_lexer(const char* source) {
     lexer.start = source;
     lexer.current = source;
     lexer.line = 1;
     lexer.column = 1;
     lexer.start_column = 1;
+    lexer.error = NULL;
+    has_peek = false;
 }
 
-static bool isAtEnd() { 
+static bool is_at_end() { 
     return *lexer.current == '\0'; 
 }
 
@@ -50,22 +57,30 @@ static char peek() {
     return *lexer.current; 
 }
 
-static char peekNext() { 
-    if (isAtEnd()) return '\0';
+static char peek_next() { 
+    if (is_at_end()) return '\0';
     return lexer.current[1]; 
 }
 
 static bool match(char expected) {
-    if (isAtEnd()) return false;
+    if (is_at_end()) return false;
     if (*lexer.current != expected) return false;
     advance();
     return true;
 }
 
+static bool is_alpha(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == '$';
+}
+
+static bool is_alpha_numeric(char c) {
+    return is_alpha(c) || isdigit(c);
+}
+
 // ======================================================
 // [SECTION] TOKEN CREATION
 // ======================================================
-static Token makeToken(TokenKind kind) {
+static Token make_token(TokenKind kind) {
     Token token;
     token.kind = kind;
     token.start = lexer.start;
@@ -73,12 +88,13 @@ static Token makeToken(TokenKind kind) {
     token.line = lexer.line;
     token.column = lexer.start_column;
     
-    // Initialize value
+    // Initialiser les valeurs
     token.value.int_val = 0;
+    token.value.str_val = NULL;
     return token;
 }
 
-static Token errorToken(const char* message) {
+static Token error_token(const char* message) {
     Token token;
     token.kind = TK_ERROR;
     token.start = message;
@@ -86,23 +102,34 @@ static Token errorToken(const char* message) {
     token.line = lexer.line;
     token.column = lexer.column;
     token.value.str_val = NULL;
+    
+    if (lexer.error) {
+        set_error(lexer.error, lexer.line, lexer.column, NULL, "Lexer error: %s", message);
+    }
+    
     return token;
 }
 
-static Token makeStringToken(TokenKind kind, char* str) {
-    Token token = makeToken(kind);
+static Token make_string_token(char* str) {
+    Token token = make_token(TK_STRING);
     token.value.str_val = str;
     return token;
 }
 
-static Token makeIntToken(int64_t value) {
-    Token token = makeToken(TK_INT);
+static Token make_char_token(char c) {
+    Token token = make_token(TK_CHAR);
+    token.value.char_val = c;
+    return token;
+}
+
+static Token make_int_token(int64_t value) {
+    Token token = make_token(TK_INT);
     token.value.int_val = value;
     return token;
 }
 
-static Token makeFloatToken(double value) {
-    Token token = makeToken(TK_FLOAT);
+static Token make_float_token(double value) {
+    Token token = make_token(TK_FLOAT);
     token.value.float_val = value;
     return token;
 }
@@ -110,7 +137,7 @@ static Token makeFloatToken(double value) {
 // ======================================================
 // [SECTION] SKIP WHITESPACE & COMMENTS
 // ======================================================
-static void skipWhitespace() {
+static void skip_whitespace() {
     while (true) {
         char c = peek();
         switch (c) {
@@ -124,23 +151,26 @@ static void skipWhitespace() {
                 lexer.column = 1;
                 advance();
                 break;
-            case '#': // Commentaire avec #
-                while (peek() != '\n' && !isAtEnd()) advance();
+            case '#':
+                // Commentaire ligne
+                while (peek() != '\n' && !is_at_end()) advance();
                 break;
             case '/':
-                if (peekNext() == '/') { // Commentaire //
-                    while (peek() != '\n' && !isAtEnd()) advance();
-                } else if (peekNext() == '*') { // Commentaire /* */
+                if (peek_next() == '/') {
+                    // Commentaire //
+                    while (peek() != '\n' && !is_at_end()) advance();
+                } else if (peek_next() == '*') {
+                    // Commentaire /* */
                     advance(); // Skip '/'
                     advance(); // Skip '*'
-                    while (!(peek() == '*' && peekNext() == '/') && !isAtEnd()) {
+                    while (!(peek() == '*' && peek_next() == '/') && !is_at_end()) {
                         if (peek() == '\n') {
                             lexer.line++;
                             lexer.column = 1;
                         }
                         advance();
                     }
-                    if (!isAtEnd()) {
+                    if (!is_at_end()) {
                         advance(); // Skip '*'
                         advance(); // Skip '/'
                     }
@@ -157,10 +187,10 @@ static void skipWhitespace() {
 // ======================================================
 // [SECTION] STRING LEXING
 // ======================================================
-static Token string(char quote_char) {
+static Token string_literal(char quote_char) {
     // Skip opening quote (already consumed)
     
-    while (peek() != quote_char && !isAtEnd()) {
+    while (peek() != quote_char && !is_at_end()) {
         if (peek() == '\n') {
             lexer.line++;
             lexer.column = 1;
@@ -168,24 +198,29 @@ static Token string(char quote_char) {
         if (peek() == '\\') { // Handle escape sequences
             advance();
             switch (peek()) {
-                case 'n': case 't': case 'r': case '\\': 
-                case '"': case '\'': case '0': case 'b': case 'f':
-                case 'v': case 'x': case 'u':
-                    advance();
-                    break;
-                default:
-                    advance(); // Just skip unknown escape
-                    break;
+                case 'n': advance(); break;
+                case 't': advance(); break;
+                case 'r': advance(); break;
+                case '\\': advance(); break;
+                case '"': advance(); break;
+                case '\'': advance(); break;
+                case '0': advance(); break;
+                case 'b': advance(); break;
+                case 'f': advance(); break;
+                case 'v': advance(); break;
+                case 'x': advance(); break;
+                case 'u': advance(); break;
+                default: advance(); break;
             }
         } else {
             advance();
         }
     }
     
-    if (isAtEnd()) {
+    if (is_at_end()) {
         char error_msg[64];
-        snprintf(error_msg, sizeof(error_msg), "Unterminated string (started with '%c')", quote_char);
-        return errorToken(error_msg);
+        snprintf(error_msg, sizeof(error_msg), "Unterminated string literal");
+        return error_token(error_msg);
     }
     
     // Skip closing quote
@@ -224,7 +259,45 @@ static Token string(char quote_char) {
         str[dest_idx] = '\0';
     }
     
-    return makeStringToken(TK_STRING, str);
+    return make_string_token(str);
+}
+
+static Token char_literal() {
+    advance(); // Skip opening quote
+    
+    if (peek() == '\\') { // Escape sequence
+        advance();
+        char escaped_char = peek();
+        advance();
+        
+        char actual_char;
+        switch (escaped_char) {
+            case 'n': actual_char = '\n'; break;
+            case 't': actual_char = '\t'; break;
+            case 'r': actual_char = '\r'; break;
+            case '\\': actual_char = '\\'; break;
+            case '\'': actual_char = '\''; break;
+            case '0': actual_char = '\0'; break;
+            default: actual_char = escaped_char; break;
+        }
+        
+        if (peek() != '\'') {
+            return error_token("Unterminated character literal");
+        }
+        advance();
+        
+        return make_char_token(actual_char);
+    } else {
+        char c = peek();
+        advance();
+        
+        if (peek() != '\'') {
+            return error_token("Unterminated character literal");
+        }
+        advance();
+        
+        return make_char_token(c);
+    }
 }
 
 // ======================================================
@@ -238,7 +311,7 @@ static Token number() {
     
     // Check for hex (0x) or binary (0b) or octal (0o)
     if (peek() == '0') {
-        char next = peekNext();
+        char next = peek_next();
         if (next == 'x' || next == 'X') {
             is_hex = true;
             advance(); // Skip '0'
@@ -268,9 +341,17 @@ static Token number() {
         while (isdigit(peek())) advance();
         
         // Decimal part
-        if (peek() == '.' && isdigit(peekNext())) {
+        if (peek() == '.' && isdigit(peek_next())) {
             is_float = true;
             advance(); // Consume '.'
+            while (isdigit(peek())) advance();
+        }
+        
+        // Exponent part
+        if (peek() == 'e' || peek() == 'E') {
+            is_float = true;
+            advance(); // Consume 'e' or 'E'
+            if (peek() == '+' || peek() == '-') advance();
             while (isdigit(peek())) advance();
         }
     }
@@ -285,7 +366,7 @@ static Token number() {
         if (is_float) {
             double value = atof(num_str);
             free(num_str);
-            return makeFloatToken(value);
+            return make_float_token(value);
         } else {
             // Determine base
             int base = 10;
@@ -295,26 +376,18 @@ static Token number() {
             
             int64_t value = strtoll(num_str, NULL, base);
             free(num_str);
-            return makeIntToken(value);
+            return make_int_token(value);
         }
     }
     
-    return errorToken("Failed to parse number");
+    return error_token("Failed to parse number");
 }
 
 // ======================================================
 // [SECTION] IDENTIFIER & KEYWORD LEXING
 // ======================================================
-static bool isAlpha(char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
-}
-
-static bool isAlphaNumeric(char c) {
-    return isAlpha(c) || isdigit(c);
-}
-
 static Token identifier() {
-    while (isAlphaNumeric(peek()) || peek() == '.' || peek() == '$' || peek() == '@') {
+    while (is_alpha_numeric(peek()) || peek() == '.' || peek() == '@') {
         advance();
     }
     
@@ -330,196 +403,213 @@ static Token identifier() {
         for (int i = 0; keywords[i].keyword != NULL; i++) {
             if (strcmp(text, keywords[i].keyword) == 0) {
                 free(text);
-                return makeToken(keywords[i].kind);
+                return make_token(keywords[i].kind);
             }
         }
         
         // If not a keyword, it's an identifier
-        Token token = makeToken(TK_IDENT);
+        Token token = make_token(TK_IDENT);
         token.value.str_val = text;
         return token;
     }
     
     free(text);
-    return errorToken("Failed to allocate memory for identifier");
+    return error_token("Failed to allocate memory for identifier");
 }
 
 // ======================================================
-// [SECTION] OPERATOR LEXING
+// [SECTION] OPERATOR LEXING (COMPLET)
 // ======================================================
-static Token operatorLexer() {
+static Token operator_lexer() {
     char c = peek();
-    char error_msg[32];
     
-    // Multi-character operators
     switch (c) {
         case '=':
             advance();
             if (match('=')) {
-                if (match('=')) return makeToken(TK_SPACESHIP); // ===
-                if (match('>')) return makeToken(TK_RDARROW); // ==>
-                return makeToken(TK_EQ); // ==
+                if (match('=')) return make_token(TK_SPACESHIP);
+                if (match('>')) return make_token(TK_RDARROW);
+                return make_token(TK_EQ);
             }
-            if (match('>')) return makeToken(TK_DARROW); // =>
-            return makeToken(TK_ASSIGN); // =
+            if (match('>')) return make_token(TK_DARROW);
+            return make_token(TK_ASSIGN);
             
         case '!':
             advance();
             if (match('=')) {
-                if (match('=')) return makeToken(TK_NEQ); // !==
-                return makeToken(TK_NEQ); // !=
+                if (match('=')) return make_token(TK_NEQ);
+                return make_token(TK_NEQ);
             }
-            return makeToken(TK_NOT); // !
+            return make_token(TK_NOT);
             
         case '<':
             advance();
             if (match('=')) {
-                if (match('=')) return makeToken(TK_LDARROW); // <==
-                return makeToken(TK_LTE); // <=
+                if (match('=')) return make_token(TK_LDARROW);
+                if (match('>')) return make_token(TK_SPACESHIP);
+                return make_token(TK_LTE);
             }
-            if (match('<')) return makeToken(TK_SHL); // <<
-            return makeToken(TK_LT); // <
+            if (match('<')) {
+                if (match('=')) return make_token(TK_SHL_ASSIGN);
+                return make_token(TK_SHL);
+            }
+            return make_token(TK_LT);
             
         case '>':
             advance();
             if (match('=')) {
-                if (match('=')) return makeToken(TK_RDARROW); // ==>
-                return makeToken(TK_GTE); // >=
+                if (match('=')) return make_token(TK_RDARROW);
+                return make_token(TK_GTE);
             }
-            if (match('>')) return makeToken(TK_SHR); // >>
-            return makeToken(TK_GT); // >
+            if (match('>')) {
+                if (match('=')) return make_token(TK_SHR_ASSIGN);
+                return make_token(TK_SHR);
+            }
+            return make_token(TK_GT);
             
         case '&':
             advance();
-            if (match('&')) return makeToken(TK_AND); // &&
-            return makeToken(TK_BIT_AND); // &
+            if (match('&')) return make_token(TK_AND);
+            if (match('=')) return make_token(TK_AND_ASSIGN);
+            return make_token(TK_BIT_AND);
             
         case '|':
             advance();
-            if (match('|')) return makeToken(TK_OR); // ||
-            return makeToken(TK_BIT_OR); // |
+            if (match('|')) return make_token(TK_OR);
+            if (match('=')) return make_token(TK_OR_ASSIGN);
+            return make_token(TK_BIT_OR);
             
         case '+':
             advance();
-            if (match('=')) return makeToken(TK_PLUS_ASSIGN); // +=
-            if (match('+')) return makeToken(TK_PLUS); // ++ (treated as plus)
-            return makeToken(TK_PLUS); // +
+            if (match('=')) return make_token(TK_PLUS_ASSIGN);
+            if (match('+')) return make_token(TK_INC);
+            return make_token(TK_PLUS);
             
         case '-':
             advance();
-            if (match('=')) return makeToken(TK_MINUS_ASSIGN); // -=
-            if (match('-')) return makeToken(TK_MINUS); // -- (treated as minus)
-            if (match('>')) return makeToken(TK_RARROW); // ->
-            return makeToken(TK_MINUS); // -
+            if (match('=')) return make_token(TK_MINUS_ASSIGN);
+            if (match('-')) return make_token(TK_DEC);
+            if (match('>')) return make_token(TK_RARROW);
+            return make_token(TK_MINUS);
             
         case '*':
             advance();
-            if (match('=')) return makeToken(TK_MULT_ASSIGN); // *=
-            if (match('*')) return makeToken(TK_POW); // **
-            return makeToken(TK_MULT); // *
+            if (match('=')) return make_token(TK_MULT_ASSIGN);
+            if (match('*')) {
+                if (match('=')) return make_token(TK_POW); // **= is pow assign
+                return make_token(TK_POW);
+            }
+            return make_token(TK_MULT);
             
         case '/':
             advance();
-            if (match('=')) return makeToken(TK_DIV_ASSIGN); // /=
-            return makeToken(TK_DIV); // /
+            if (match('=')) return make_token(TK_DIV_ASSIGN);
+            return make_token(TK_DIV);
             
         case '%':
             advance();
-            if (match('=')) return makeToken(TK_MOD_ASSIGN); // %=
-            return makeToken(TK_MOD); // %
+            if (match('=')) return make_token(TK_MOD_ASSIGN);
+            return make_token(TK_MOD);
             
         case '^':
             advance();
-            if (match('=')) return makeToken(TK_BIT_XOR); // ^= (treated as xor)
-            return makeToken(TK_BIT_XOR); // ^
+            if (match('=')) return make_token(TK_XOR_ASSIGN);
+            return make_token(TK_BIT_XOR);
             
         case '~':
             advance();
-            return makeToken(TK_BIT_NOT); // ~
+            return make_token(TK_BIT_NOT);
             
         case '.':
             advance();
             if (match('.')) {
-                if (match('.')) return makeToken(TK_ELLIPSIS); // ...
-                return makeToken(TK_RANGE); // .. (treated as range)
+                if (match('.')) return make_token(TK_SPREAD);
+                return make_token(TK_RANGE);
             }
-            return makeToken(TK_PERIOD); // .
+            if (match('?')) return make_token(TK_SAFE_NAV);
+            return make_token(TK_PERIOD);
             
         case '?':
             advance();
-            return makeToken(TK_QUESTION); // ?
+            if (match('.')) return make_token(TK_SAFE_NAV);
+            if (match('?')) return make_token(TK_NULL_COALESCE);
+            return make_token(TK_QUESTION);
             
         case ':':
             advance();
-            if (match(':')) return makeToken(TK_SCOPE); // ::
-            return makeToken(TK_COLON); // :
+            if (match(':')) return make_token(TK_SCOPE);
+            return make_token(TK_COLON);
             
         case '@':
             advance();
-            return makeToken(TK_AT); // @
+            return make_token(TK_AT);
             
         case '$':
             advance();
-            return makeToken(TK_DOLLAR); // $
+            return make_token(TK_DOLLAR);
             
         case '#':
             advance();
-            return makeToken(TK_HASH); // #
+            return make_token(TK_HASH);
+            
+        case '`':
+            advance();
+            return make_token(TK_BACKTICK);
             
         case ';':
             advance();
-            return makeToken(TK_SEMICOLON); // ;
+            return make_token(TK_SEMICOLON);
             
         case ',':
             advance();
-            return makeToken(TK_COMMA); // ,
+            return make_token(TK_COMMA);
             
         case '(':
             advance();
-            return makeToken(TK_LPAREN); // (
+            return make_token(TK_LPAREN);
             
         case ')':
             advance();
-            return makeToken(TK_RPAREN); // )
+            return make_token(TK_RPAREN);
             
         case '{':
             advance();
-            return makeToken(TK_LBRACE); // {
+            return make_token(TK_LBRACE);
             
         case '}':
             advance();
-            return makeToken(TK_RBRACE); // }
+            return make_token(TK_RBRACE);
             
         case '[':
             advance();
-            return makeToken(TK_LBRACKET); // [
+            return make_token(TK_LBRACKET);
             
         case ']':
             advance();
-            return makeToken(TK_RBRACKET); // ]
+            return make_token(TK_RBRACKET);
             
         default:
-            // Unknown character
             advance();
+            char error_msg[32];
             snprintf(error_msg, sizeof(error_msg), "Unexpected character: '%c'", c);
-            return errorToken(error_msg);
+            return error_token(error_msg);
     }
 }
 
 // ======================================================
 // [SECTION] MAIN LEXER FUNCTION
 // ======================================================
-Token scanToken() {
-    skipWhitespace();
+Token scan_token() {
+    skip_whitespace();
     lexer.start = lexer.current;
     lexer.start_column = lexer.column;
     
-    if (isAtEnd()) return makeToken(TK_EOF);
+    if (is_at_end()) return make_token(TK_EOF);
     
     char c = peek();
     
     // Identifiers and keywords
-    if (isAlpha(c) || c == '_' || c == '$' || c == '@') {
+    if (is_alpha(c)) {
         return identifier();
     }
     
@@ -528,12 +618,49 @@ Token scanToken() {
         return number();
     }
     
-    // Strings
+    // Strings and characters
     if (c == '"' || c == '\'') {
         advance(); // Skip quote
-        return string(c);
+        if (c == '\'' && peek() != '\'') {
+            return char_literal();
+        }
+        return string_literal(c);
+    }
+    
+    // Template strings
+    if (c == '`') {
+        advance();
+        return string_literal('`');
     }
     
     // Operators and punctuation
-    return operatorLexer();
+    return operator_lexer();
+}
+
+Token peek_token() {
+    if (!has_peek) {
+        const char* saved_current = lexer.current;
+        int saved_line = lexer.line;
+        int saved_column = lexer.column;
+        int saved_start_column = lexer.start_column;
+        const char* saved_start = lexer.start;
+        
+        peek_token = scan_token();
+        has_peek = true;
+        
+        lexer.current = saved_current;
+        lexer.line = saved_line;
+        lexer.column = saved_column;
+        lexer.start_column = saved_start_column;
+        lexer.start = saved_start;
+    }
+    return peek_token;
+}
+
+Token previous_token() {
+    return previous_token;
+}
+
+bool is_at_end_wrapper() {
+    return is_at_end();
 }
