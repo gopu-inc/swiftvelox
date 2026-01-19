@@ -101,7 +101,10 @@ typedef enum {
     // Special
     TK_MAIN, TK_THIS, TK_SUPER, TK_SELF,
     TK_INIT, TK_DEINIT, TK_CONSTRUCTOR, TK_DESTRUCTOR,
-    
+    // Dans l'énumération TokenKind (common.h), ajoutez :
+    TK_ELLIPSIS,    // ...
+    TK_RANGE,       // ..
+    TK_SCOPE,       // ::
     // End markers
     TK_EOF, TK_ERROR, TK_UNKNOWN
 } TokenKind;
