@@ -1,10 +1,10 @@
 CC = gcc
-CFLAGS = -std=c99 -Wall -Wextra -pedantic -g
+CFLAGS = -std=c99 -Wall -Wextra -pedantic -g -I.
 LDFLAGS = -lm
 
 SOURCES = lexer.c parser.c swf.c
 OBJECTS = $(SOURCES:.c=.o)
-TARGET = swf
+TARGET = swiftflow
 
 all: $(TARGET)
 
@@ -18,7 +18,7 @@ clean:
 	rm -f $(OBJECTS) $(TARGET)
 
 test: $(TARGET)
-	./$(TARGET) examples/test.sf
+	./$(TARGET) test.sf
 
 repl: $(TARGET)
 	./$(TARGET)
