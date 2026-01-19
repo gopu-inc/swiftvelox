@@ -55,7 +55,7 @@
 
 ### 📦 Système de Packages Avancé
 
-*   Packages hiérarchiques avec fichiers `.sflib`
+*   Packages hiérarchiques avec fichiers `.svlib`
 *   Imports relatifs (`./`, `../`, chemins absolus)
 *   Exports contrôlés avec alias
 *   Gestion des dépendances automatique
@@ -100,7 +100,8 @@ curl -fsSL https://raw.githubusercontent.com/gopu-inc/swiftflow/main/install.sh 
 ### Vérification
 
 ```bash
-swiftflow --version
+swiftflow
+
 # SwiftFlow v2.0-Fusion - GoPU.inc © 2026
 ```
 
@@ -272,18 +273,18 @@ print("Multiple: " + 10 + ", " + 20 + ", " + 30);
 ```text
 /usr/local/lib/swiftflow/
 ├── stdlib/                    # Bibliothèque standard
-│   ├── stdlib.sflib          # Manifest
-│   ├── math.sfl              # Module mathématique
-│   ├── io.sfl                # Entrée/sortie
-│   └── strings.sfl           # Manipulation chaînes
+│   ├── stdlib.svlib         # Manifest
+│   ├── math.swf             # Module mathématique
+│   ├── io.swf                # Entrée/sortie
+│   └── strings.swf           # Manipulation chaînes
 ├── monapp/                   # Application personnelle
-│   ├── monapp.sflib
-│   ├── utils.sfl
-│   └── api.sfl
+│   ├── monapp.swf
+│   ├── utils.swf
+│   └── api.swf
 └── community/               # Packages communautaires
-    ├── http.sfl
-    ├── database.sfl
-    └── gui.sfl
+    ├── http.swf
+    ├── database.swf
+    └── gui.swf
 ```
 
 ### Création d'un Package
@@ -298,7 +299,7 @@ cd monpackage
 **2. Créer le manifest (.sflib)**
 
 ```swift
-// monpackage.sflib
+// monpackage.svlib
 export "core" as "core";
 export "utils" as "utils";
 
@@ -315,14 +316,14 @@ export VERSION as "version";
 **3. Créer les modules**
 
 ```swift
-// core.sfl
+// core.swf
 var config = chargerConfig();
 func initialiser() {
     print("Package initialisé");
 }
 export initialiser as "init";
 
-// utils.sfl
+// utils.swf
 func formaterDate() {
     return "2026-01-19";
 }
@@ -379,7 +380,7 @@ export VAR1 as "v1", VAR2 as "v2";
 ### Exemple 1 : Calculateur
 
 ```swift
-// calculateur.sfl
+// calculateur.swf
 import "math" from "stdlib";
 
 func calculerAire(rayon) {
@@ -408,7 +409,7 @@ main() {
 ### Exemple 2 : Gestion de Données
 
 ```swift
-// gestion.sfl
+// gestion.swf
 net PORT = 3000;
 clog DEBUG = true;
 dos BUFFER_SIZE = 1024;
@@ -445,7 +446,7 @@ main() {
 ### Exemple 3 : Application Web (concept)
 
 ```swift
-// app.sfl
+// app.swf
 import "http" from "community";
 import "database" as "db" from "community";
 
@@ -549,12 +550,12 @@ sv_register_function(ctx, "extension_native", swift_extension);
 
 ```swift
 // 1. Vérifier le chemin
-import "./monmodule.sfl";        // Relatif
-import "/chemin/absolu.sfl";     // Absolu
+import "./monmodule.swf";        // Relatif
+import "/chemin/absolu.swf";     // Absolu
 
 // 2. Créer le package
 mkdir -p /usr/local/lib/swiftflow/monpackage
-cp monpackage.sflib /usr/local/lib/swiftflow/monpackage/
+cp monpackage.svlib /usr/local/lib/swiftflow/monpackage/
 
 // 3. Vérifier les permissions
 chmod +r /usr/local/lib/swiftflow/monpackage/*
@@ -706,7 +707,7 @@ Les contributions deviennent la propriété de GoPU.inc. En contribuant, vous ac
 
 <br/>
 
-**GoPU.inc** - Innovation depuis 2023
+**GoPU.inc** - Innovation depuis 2026
 
 </div>
 
