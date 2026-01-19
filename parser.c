@@ -6,6 +6,7 @@
 
 extern Token scanToken();
 extern void initLexer(const char* source);
+extern bool isAtEnd();
 
 // ======================================================
 // [SECTION] PARSER STATE
@@ -35,27 +36,6 @@ static bool check(TokenKind kind) {
     return current.kind == kind;
 }
 
-static bool checkNext(TokenKind kind) {
-    if (isAtEnd()) return false;
-    return peekNextToken().kind == kind;
-}
-
-static Token peekNextToken() {
-    // Save current state
-    const char* saved_current = lexer.current;
-    int saved_line = lexer.line;
-    int saved_column = lexer.column;
-    
-    Token next = scanToken();
-    
-    // Restore state
-    lexer.current = saved_current;
-    lexer.line = saved_line;
-    lexer.column = saved_column;
-    
-    return next;
-}
-
 static void errorAt(Token token, const char* message) {
     if (panicMode) return;
     panicMode = true;
@@ -67,10 +47,6 @@ static void errorAt(Token token, const char* message) {
 
 static void error(const char* message) {
     errorAt(previous, message);
-}
-
-static void errorAtCurrent(const char* message) {
-    errorAt(current, message);
 }
 
 static void synchronize() {
@@ -158,7 +134,6 @@ static ASTNode* comparison();
 static ASTNode* term();
 static ASTNode* factor();
 static ASTNode* unary();
-static ASTNode* call();
 static ASTNode* primary();
 
 static ASTNode* expression() {
@@ -232,7 +207,7 @@ static ASTNode* logicAnd() {
 static ASTNode* equality() {
     ASTNode* expr = comparison();
     
-    while (match(TK_EQ) || match(TK_NEQ) || match(TK_SPACESHIP)) {
+    while (match(TK_EQ) || match(TK_NEQ)) {
         TokenKind op = previous.kind;
         ASTNode* node = newNode(NODE_BINARY);
         if (node) {
@@ -266,7 +241,7 @@ static ASTNode* comparison() {
 static ASTNode* term() {
     ASTNode* expr = factor();
     
-    while (match(TK_PLUS) || match(TK_MINUS) || match(TK_CONCAT)) {
+    while (match(TK_PLUS) || match(TK_MINUS)) {
         TokenKind op = previous.kind;
         ASTNode* node = newNode(NODE_BINARY);
         if (node) {
@@ -283,7 +258,7 @@ static ASTNode* term() {
 static ASTNode* factor() {
     ASTNode* expr = unary();
     
-    while (match(TK_MULT) || match(TK_DIV) || match(TK_MOD) || match(TK_POW)) {
+    while (match(TK_MULT) || match(TK_DIV) || match(TK_MOD)) {
         TokenKind op = previous.kind;
         ASTNode* node = newNode(NODE_BINARY);
         if (node) {
@@ -298,7 +273,7 @@ static ASTNode* factor() {
 }
 
 static ASTNode* unary() {
-    if (match(TK_MINUS) || match(TK_NOT) || match(TK_BIT_NOT)) {
+    if (match(TK_MINUS) || match(TK_NOT)) {
         TokenKind op = previous.kind;
         ASTNode* node = newNode(NODE_UNARY);
         if (node) {
@@ -308,51 +283,7 @@ static ASTNode* unary() {
         }
     }
     
-    return call();
-}
-
-static ASTNode* call() {
-    ASTNode* expr = primary();
-    
-    while (true) {
-        if (match(TK_LPAREN)) {
-            // Function call
-            ASTNode* node = newNode(NODE_FUNC_CALL);
-            if (node) {
-                node->left = expr;
-                
-                // Parse arguments
-                if (!check(TK_RPAREN)) {
-                    do {
-                        // TODO: Add arguments
-                    } while (match(TK_COMMA));
-                }
-                
-                if (!match(TK_RPAREN)) {
-                    error("Expected ')' after arguments");
-                }
-                
-                expr = node;
-            }
-        } else if (match(TK_PERIOD)) {
-            // Member access
-            if (!match(TK_IDENT)) {
-                error("Expected member name after '.'");
-                break;
-            }
-            
-            ASTNode* node = newNode(NODE_MEMBER_ACCESS);
-            if (node) {
-                node->left = expr;
-                node->data.name = str_copy(previous.value.str_val);
-                expr = node;
-            }
-        } else {
-            break;
-        }
-    }
-    
-    return expr;
+    return primary();
 }
 
 static ASTNode* primary() {
@@ -366,14 +297,6 @@ static ASTNode* primary() {
     if (match(TK_STRING)) return newStringNode(previous.value.str_val);
     
     if (match(TK_IDENT)) return newIdentNode(previous.value.str_val);
-    
-    if (match(TK_LPAREN)) {
-        ASTNode* expr = expression();
-        if (!match(TK_RPAREN)) {
-            error("Expected ')' after expression");
-        }
-        return expr;
-    }
     
     if (match(TK_SIZEOF) || match(TK_SIZE) || match(TK_SIZ)) {
         if (!match(TK_LPAREN)) {
@@ -401,6 +324,14 @@ static ASTNode* primary() {
         return node;
     }
     
+    if (match(TK_LPAREN)) {
+        ASTNode* expr = expression();
+        if (!match(TK_RPAREN)) {
+            error("Expected ')' after expression");
+        }
+        return expr;
+    }
+    
     error("Expected expression");
     return NULL;
 }
@@ -417,6 +348,7 @@ static ASTNode* forStatement();
 static ASTNode* returnStatement();
 static ASTNode* printStatement();
 static ASTNode* variableDeclaration();
+static ASTNode* expressionStatement();
 
 static ASTNode* statement() {
     if (match(TK_PRINT)) return printStatement();
@@ -481,6 +413,9 @@ static ASTNode* ifStatement() {
         return NULL;
     }
     
+    // Optional 'then' keyword
+    match(TK_THEN);
+    
     node->right = statement(); // Then branch
     
     if (match(TK_ELSE)) {
@@ -526,14 +461,14 @@ static ASTNode* forStatement() {
         // No initializer
     } else if (match(TK_VAR) || match(TK_LET) || match(TK_CONST) ||
                match(TK_NET) || match(TK_CLOG) || match(TK_DOS) || match(TK_SEL)) {
-        node->left = variableDeclaration();
+        node->data.loop.init = variableDeclaration();
     } else {
-        node->left = expressionStatement();
+        node->data.loop.init = expressionStatement();
     }
     
     // Condition
     if (!check(TK_SEMICOLON)) {
-        node->extra = expression(); // Condition stored in extra
+        node->data.loop.condition = expression();
     }
     if (!match(TK_SEMICOLON)) {
         error("Expected ';' after loop condition");
@@ -541,13 +476,13 @@ static ASTNode* forStatement() {
     
     // Increment
     if (!check(TK_RPAREN)) {
-        node->third = expression(); // Increment stored in third
+        node->data.loop.update = expression();
     }
     if (!match(TK_RPAREN)) {
         error("Expected ')' after for clauses");
     }
     
-    node->right = statement(); // Body
+    node->data.loop.body = statement(); // Body
     
     return node;
 }
@@ -577,18 +512,16 @@ static ASTNode* printStatement() {
     
     node->left = expression();
     
-    // Optional additional arguments
-    while (match(TK_COMMA)) {
-        // TODO: Handle multiple print arguments
-        expression();
-    }
-    
     if (!match(TK_RPAREN)) {
         error("Expected ')' after print arguments");
+        free(node);
+        return NULL;
     }
     
     if (!match(TK_SEMICOLON)) {
         error("Expected ';' after print statement");
+        free(node);
+        return NULL;
     }
     
     return node;
@@ -626,15 +559,6 @@ static ASTNode* variableDeclaration() {
     
     node->data.name = varName;
     
-    // Optional type annotation
-    if (match(TK_COLON)) {
-        if (match(TK_IDENT)) {
-            node->data.type_name = str_copy(previous.value.str_val);
-        } else {
-            error("Expected type name after ':'");
-        }
-    }
-    
     // Optional initialization
     if (match(TK_ASSIGN) || match(TK_DARROW) || match(TK_LDARROW) || match(TK_RDARROW)) {
         node->left = expression();
@@ -648,254 +572,20 @@ static ASTNode* variableDeclaration() {
 }
 
 // ======================================================
-// [SECTION] FUNCTION & CLASS DECLARATION
-// ======================================================
-static ASTNode* functionDeclaration() {
-    if (!match(TK_IDENT)) {
-        error("Expected function name");
-        return NULL;
-    }
-    
-    char* funcName = str_copy(previous.value.str_val);
-    ASTNode* node = newNode(NODE_FUNC_DECL);
-    if (!node) {
-        free(funcName);
-        return NULL;
-    }
-    
-    node->data.func.name = funcName;
-    
-    // Parameters
-    if (!match(TK_LPAREN)) {
-        error("Expected '(' after function name");
-        free(funcName);
-        free(node);
-        return NULL;
-    }
-    
-    if (!match(TK_RPAREN)) {
-        // TODO: Parse parameters
-        if (!match(TK_RPAREN)) {
-            error("Expected ')' after parameters");
-        }
-    }
-    
-    // Return type
-    if (match(TK_COLON)) {
-        if (match(TK_IDENT)) {
-            node->data.func.return_type = str_copy(previous.value.str_val);
-        } else {
-            error("Expected return type after ':'");
-        }
-    }
-    
-    // Function body
-    if (!match(TK_LBRACE)) {
-        error("Expected '{' before function body");
-    }
-    
-    node->data.func.body = block();
-    
-    return node;
-}
-
-static ASTNode* classDeclaration() {
-    if (!match(TK_IDENT)) {
-        error("Expected class name");
-        return NULL;
-    }
-    
-    char* className = str_copy(previous.value.str_val);
-    ASTNode* node = newNode(NODE_CLASS);
-    if (!node) {
-        free(className);
-        return NULL;
-    }
-    
-    node->data.class_def.name = className;
-    
-    // Inheritance
-    if (match(TK_COLON)) {
-        if (match(TK_IDENT)) {
-            node->data.class_def.parent_class = str_copy(previous.value.str_val);
-        } else {
-            error("Expected parent class name after ':'");
-        }
-    }
-    
-    if (!match(TK_LBRACE)) {
-        error("Expected '{' before class body");
-    }
-    
-    // Parse class members
-    while (!check(TK_RBRACE) && !check(TK_EOF)) {
-        // Parse member visibility
-        char* visibility = "private";
-        if (match(TK_PUBLIC)) visibility = "public";
-        else if (match(TK_PRIVATE)) visibility = "private";
-        else if (match(TK_PROTECTED)) visibility = "protected";
-        
-        // Parse member
-        if (match(TK_VAR) || match(TK_LET) || match(TK_CONST) ||
-            match(TK_NET) || match(TK_CLOG) || match(TK_DOS) || match(TK_SEL)) {
-            // TODO: Add member to class
-        } else if (match(TK_FUNC)) {
-            // Method
-            // TODO: Parse method
-        } else {
-            error("Expected member declaration in class");
-            break;
-        }
-    }
-    
-    if (!match(TK_RBRACE)) {
-        error("Expected '}' after class body");
-    }
-    
-    return node;
-}
-
-// ======================================================
-// [SECTION] IMPORT & MODULE DECLARATION
-// ======================================================
-static ASTNode* importDeclaration() {
-    if (!match(TK_LPAREN)) {
-        error("Expected '(' after import");
-        return NULL;
-    }
-    
-    if (!match(TK_RPAREN)) {
-        error("Expected ')' after '('");
-        return NULL;
-    }
-    
-    if (!match(TK_LBRACE)) {
-        error("Expected '{' for import list");
-        return NULL;
-    }
-    
-    ASTNode* node = newNode(NODE_IMPORT);
-    if (!node) return NULL;
-    
-    // Parse import list
-    char** imports = NULL;
-    int count = 0;
-    int capacity = 4;
-    
-    imports = malloc(capacity * sizeof(char*));
-    if (!imports) {
-        free(node);
-        return NULL;
-    }
-    
-    // First import
-    if (match(TK_STRING)) {
-        imports[count++] = str_copy(previous.value.str_val);
-    } else {
-        error("Expected string in import list");
-        free(imports);
-        free(node);
-        return NULL;
-    }
-    
-    // Additional imports or 'from'
-    while (match(TK_COMMA)) {
-        // Check for 'from'
-        if (check(TK_FROM)) {
-            advance(); // Consume 'from'
-            
-            if (!match(TK_STRING)) {
-                error("Expected module name after 'from'");
-                break;
-            }
-            
-            node->data.imports.from_module = str_copy(previous.value.str_val);
-            break;
-        }
-        
-        // Another import
-        if (count >= capacity) {
-            capacity *= 2;
-            char** new_imports = realloc(imports, capacity * sizeof(char*));
-            if (!new_imports) {
-                for (int i = 0; i < count; i++) free(imports[i]);
-                free(imports);
-                free(node);
-                return NULL;
-            }
-            imports = new_imports;
-        }
-        
-        if (match(TK_STRING)) {
-            imports[count++] = str_copy(previous.value.str_val);
-        } else {
-            error("Expected string after comma");
-            break;
-        }
-    }
-    
-    if (!match(TK_RBRACE)) {
-        error("Expected '}' after import list");
-        for (int i = 0; i < count; i++) free(imports[i]);
-        free(imports);
-        free(node);
-        return NULL;
-    }
-    
-    if (!match(TK_SEMICOLON)) {
-        error("Expected ';' after import statement");
-        for (int i = 0; i < count; i++) free(imports[i]);
-        free(imports);
-        free(node);
-        return NULL;
-    }
-    
-    node->data.imports.modules = imports;
-    node->data.imports.module_count = count;
-    return node;
-}
-
-// ======================================================
-// [SECTION] TYPELOCK DECLARATION
-// ======================================================
-static ASTNode* typelockDeclaration() {
-    if (!match(TK_LBRACE)) {
-        error("Expected '{' after typelock");
-        return NULL;
-    }
-    
-    ASTNode* node = newNode(NODE_TYPELOCK);
-    
-    // Parse typelock body
-    while (!check(TK_RBRACE) && !check(TK_EOF)) {
-        // TODO: Parse typelock members (type definitions)
-        advance();
-    }
-    
-    if (!match(TK_RBRACE)) {
-        error("Expected '}' after typelock body");
-    }
-    
-    return node;
-}
-
-// ======================================================
 // [SECTION] MAIN DECLARATION
 // ======================================================
 static ASTNode* mainDeclaration() {
-    ASTNode* node = newNode(NODE_MAIN);
-    
     if (!match(TK_LPAREN)) {
         error("Expected '(' after main");
-        free(node);
         return NULL;
     }
     
     if (!match(TK_RPAREN)) {
         error("Expected ')' after '('");
-        free(node);
         return NULL;
     }
+    
+    ASTNode* node = newNode(NODE_MAIN);
     
     // Main body
     if (!match(TK_LBRACE)) {
@@ -926,10 +616,6 @@ static ASTNode* dbvarCommand() {
 // [SECTION] DECLARATION PARSING
 // ======================================================
 static ASTNode* declaration() {
-    if (match(TK_CLASS)) return classDeclaration();
-    if (match(TK_FUNC)) return functionDeclaration();
-    if (match(TK_IMPORT)) return importDeclaration();
-    if (match(TK_TYPELOCK)) return typelockDeclaration();
     if (match(TK_MAIN)) return mainDeclaration();
     if (match(TK_DBVAR)) return dbvarCommand();
     
