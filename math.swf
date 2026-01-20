@@ -1,5 +1,0 @@
-var pi = 3.14159;
-var e = 2.71828;
-print("Math module loaded successfully");
-print("pi = " + pi);
-print("e = " + e);

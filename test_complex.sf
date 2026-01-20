@@ -1,9 +1,0 @@
-// Test complexe
-var x = 10;
-net y = 20.5;
-clog msg = "Hello World";
-print(x);
-print(y);
-print(msg);
-print("Size of x: ", size(x));
-dbvar;
