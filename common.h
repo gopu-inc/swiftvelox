@@ -11,6 +11,8 @@
 #include <time.h>
 #include <math.h>
 #include <errno.h>
+#include <stdarg.h>
+
 
 // ======================================================
 // [SECTION] COULEURS POUR LE TERMINAL
@@ -533,5 +535,10 @@ static inline void log_info(const char* file, int line, int col,
     
     va_end(args);
 }
+// ======================================================
+// [SECTION] EXTERN DECLARATIONS
+// ======================================================
+extern bool isAtEnd(void);
+extern ASTNode* newNode(NodeType type);
 
 #endif // COMMON_H
