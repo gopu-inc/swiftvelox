@@ -206,25 +206,71 @@ static char* resolveImportPath(const char* import_path, const char* from_package
     // Handle local imports
     if (isLocalImport(import_path)) {
         if (import_path[0] == '/') {
-            // Absolute path
+            // Absolute path - copy with bounds checking
             strncpy(resolved, import_path, PATH_MAX - 1);
+            resolved[PATH_MAX - 1] = '\0';
         } else if (strncmp(import_path, "./", 2) == 0) {
             // Current directory
-            snprintf(resolved, PATH_MAX - 1, "%s/%s", current_working_dir, import_path + 2);
+            size_t cwd_len = strlen(current_working_dir);
+            size_t import_len = strlen(import_path + 2);
+            
+            if (cwd_len + 1 + import_len < PATH_MAX) {
+                snprintf(resolved, PATH_MAX, "%s/%s", 
+                        current_working_dir, import_path + 2);
+            } else {
+                print_warning("Path too long: %s/%s", current_working_dir, import_path + 2);
+                free(resolved);
+                return NULL;
+            }
         } else if (strncmp(import_path, "../", 3) == 0) {
             // Parent directory
             char parent_dir[PATH_MAX];
-            strncpy(parent_dir, current_working_dir, PATH_MAX - 1);
-            parent_dir[PATH_MAX - 1] = '\0';
+            strncpy(parent_dir, current_working_dir, sizeof(parent_dir) - 1);
+            parent_dir[sizeof(parent_dir) - 1] = '\0';
+            
             char* last_slash = strrchr(parent_dir, '/');
-            if (last_slash) *last_slash = '\0';
-            snprintf(resolved, PATH_MAX - 1, "%s/%s", parent_dir, import_path + 3);
+            if (last_slash) {
+                *last_slash = '\0';
+            } else {
+                // No parent directory
+                strcpy(parent_dir, ".");
+            }
+            
+            size_t parent_len = strlen(parent_dir);
+            size_t import_len = strlen(import_path + 3);
+            
+            if (parent_len + 1 + import_len < PATH_MAX) {
+                snprintf(resolved, PATH_MAX, "%s/%s", 
+                        parent_dir, import_path + 3);
+            } else {
+                print_warning("Path too long: %s/%s", parent_dir, import_path + 3);
+                free(resolved);
+                return NULL;
+            }
+        } else {
+            // Relative path without ./
+            size_t cwd_len = strlen(current_working_dir);
+            size_t import_len = strlen(import_path);
+            
+            if (cwd_len + 1 + import_len < PATH_MAX) {
+                snprintf(resolved, PATH_MAX, "%s/%s", 
+                        current_working_dir, import_path);
+            } else {
+                print_warning("Path too long: %s/%s", current_working_dir, import_path);
+                free(resolved);
+                return NULL;
+            }
         }
         
         // Add .swf extension if not present
         if (!strstr(resolved, ".swf")) {
-            if (strlen(resolved) + 5 < PATH_MAX) {
+            size_t len = strlen(resolved);
+            if (len + 5 < PATH_MAX) {
                 strcat(resolved, ".swf");
+            } else {
+                print_warning("Path too long for .swf extension: %s", resolved);
+                free(resolved);
+                return NULL;
             }
         }
         
@@ -260,13 +306,29 @@ static char* resolveImportPath(const char* import_path, const char* from_package
         }
         
         // If not found in .svlib, try direct path
-        snprintf(resolved, PATH_MAX - 1, "/usr/local/lib/swift/%s/%s.swf", 
-                from_package, import_path);
+        size_t pkg_len = strlen(from_package);
+        size_t import_len = strlen(import_path);
+        
+        if (strlen("/usr/local/lib/swift/") + pkg_len + 1 + import_len + 4 < PATH_MAX) {
+            snprintf(resolved, PATH_MAX - 1, "/usr/local/lib/swift/%s/%s.swf", 
+                    from_package, import_path);
+        } else {
+            print_warning("Package import path too long: %s/%s", from_package, import_path);
+            free(resolved);
+            return NULL;
+        }
         return resolved;
     }
     
     // Try system modules
-    snprintf(resolved, PATH_MAX - 1, "/usr/local/lib/swift/modules/%s.swf", import_path);
+    if (strlen("/usr/local/lib/swift/modules/") + strlen(import_path) + 4 < PATH_MAX) {
+        snprintf(resolved, PATH_MAX - 1, "/usr/local/lib/swift/modules/%s.swf", import_path);
+    } else {
+        print_warning("System module path too long: %s", import_path);
+        free(resolved);
+        return NULL;
+    }
+    
     return resolved;
 }
 
