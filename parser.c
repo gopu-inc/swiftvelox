@@ -39,23 +39,19 @@ static bool check(TokenKind kind) {
     return current.kind == kind;
 }
 
-static bool checkNext(TokenKind kind) {
-    return current.kind == kind;
-}
-
 static void errorAt(Token token, const char* message) {
     if (panicMode) return;
-    if (errorCount >= 5) {
-        fprintf(stderr, "\033[1;31m[PARSER FATAL]\033[0m Too many errors (5+). Stopping.\n");
+    if (errorCount >= 10) {
+        fprintf(stderr, "%s[PARSER FATAL]%s Too many errors (10+). Stopping.\n", 
+                COLOR_RED, COLOR_RESET);
         exit(1);
     }
     errorCount++;
     
     panicMode = true;
-    fprintf(stderr, "\033[1;31m[PARSER ERROR]\033[0m Line %d, Col %d: %s\n", 
-            token.line, token.column, message);
+    fprintf(stderr, "%s[PARSER ERROR]%s Line %d, Col %d: %s\n", 
+            COLOR_RED, COLOR_RESET, token.line, token.column, message);
     
-    // Afficher le token problématique
     if (token.start) {
         fprintf(stderr, "  Token: '%.*s' (type: %d)\n", 
                 token.length, token.start, token.kind);
@@ -96,6 +92,8 @@ static void synchronize() {
             case TK_RETURN:
             case TK_IMPORT:
             case TK_EXPORT:
+            case TK_MAIN:
+            case TK_TYPEDEF:
                 return;
             default:
                 break;
@@ -153,6 +151,7 @@ static ASTNode* newIdentNode(char* name) {
 // ======================================================
 static ASTNode* expression();
 static ASTNode* assignment();
+static ASTNode* ternary();
 static ASTNode* logicOr();
 static ASTNode* logicAnd();
 static ASTNode* equality();
@@ -160,36 +159,70 @@ static ASTNode* comparison();
 static ASTNode* term();
 static ASTNode* factor();
 static ASTNode* unary();
+static ASTNode* call();
+static ASTNode* memberAccess();
 static ASTNode* primary();
 
+// Main expression entry point
 static ASTNode* expression() {
     return assignment();
 }
 
+// Assignment: IDENT '=' expression | ternary
 static ASTNode* assignment() {
-    ASTNode* expr = logicOr();
+    ASTNode* expr = ternary();
     
     if (match(TK_ASSIGN) || match(TK_PLUS_ASSIGN) || 
         match(TK_MINUS_ASSIGN) || match(TK_MULT_ASSIGN) ||
-        match(TK_DIV_ASSIGN) || match(TK_MOD_ASSIGN)) {
+        match(TK_DIV_ASSIGN) || match(TK_MOD_ASSIGN) ||
+        match(TK_POW_ASSIGN) || match(TK_CONCAT_ASSIGN)) {
         
         TokenKind op = previous.kind;
         ASTNode* value = assignment();
         
-        if (expr->type != NODE_IDENT) {
+        // Check if valid assignment target
+        if (expr->type != NODE_IDENT && 
+            expr->type != NODE_MEMBER_ACCESS &&
+            expr->type != NODE_ARRAY_ACCESS) {
             error("Invalid assignment target");
             return expr;
         }
         
         ASTNode* node = newNode(NODE_ASSIGN);
         if (node) {
-            node->data.name = str_copy(expr->data.name);
-            node->left = value;
+            node->left = expr;
+            node->right = value;
             node->op_type = op;
+            
+            // For simple identifiers, store name
+            if (expr->type == NODE_IDENT && expr->data.name) {
+                node->data.name = str_copy(expr->data.name);
+            }
         }
+        return node;
+    }
+    
+    return expr;
+}
+
+// Ternary: logicOr '?' expression ':' expression
+static ASTNode* ternary() {
+    ASTNode* expr = logicOr();
+    
+    if (match(TK_QUESTION)) {
+        ASTNode* trueExpr = expression();
+        if (!match(TK_COLON)) {
+            error("Expected ':' in ternary operator");
+            return expr;
+        }
+        ASTNode* falseExpr = ternary();
         
-        free(expr->data.name);
-        free(expr);
+        ASTNode* node = newNode(NODE_TERNARY);
+        if (node) {
+            node->left = expr;        // Condition
+            node->right = trueExpr;   // True branch
+            node->third = falseExpr;  // False branch
+        }
         return node;
     }
     
@@ -265,7 +298,7 @@ static ASTNode* comparison() {
 static ASTNode* term() {
     ASTNode* expr = factor();
     
-    while (match(TK_PLUS) || match(TK_MINUS)) {
+    while (match(TK_PLUS) || match(TK_MINUS) || match(TK_CONCAT)) {
         TokenKind op = previous.kind;
         ASTNode* node = newNode(NODE_BINARY);
         if (node) {
@@ -307,7 +340,95 @@ static ASTNode* unary() {
         }
     }
     
-    return primary();
+    return call();
+}
+
+static ASTNode* call() {
+    ASTNode* expr = memberAccess();
+    
+    if (match(TK_LPAREN)) {
+        ASTNode* node = newNode(NODE_FUNC_CALL);
+        if (!node) return expr;
+        
+        // Store function name
+        if (expr->type == NODE_IDENT && expr->data.name) {
+            node->data.name = str_copy(expr->data.name);
+        }
+        
+        // Parse arguments
+        ASTNode* args = NULL;
+        ASTNode* current_arg = NULL;
+        
+        if (!match(TK_RPAREN)) {
+            ASTNode* first_arg = expression();
+            args = first_arg;
+            current_arg = first_arg;
+            
+            while (match(TK_COMMA)) {
+                ASTNode* next_arg = expression();
+                if (current_arg) {
+                    current_arg->right = next_arg;
+                    current_arg = next_arg;
+                }
+            }
+            
+            if (!match(TK_RPAREN)) {
+                error("Expected ')' after arguments");
+            }
+        }
+        
+        // Cleanup the original identifier node
+        if (expr->type == NODE_IDENT) {
+            free(expr->data.name);
+        }
+        free(expr);
+        
+        node->left = args;  // Arguments chain
+        return node;
+    }
+    
+    return expr;
+}
+
+static ASTNode* memberAccess() {
+    ASTNode* expr = primary();
+    
+    while (match(TK_PERIOD) || match(TK_LBRACKET) || match(TK_SAFE_NAV)) {
+        TokenKind op = previous.kind;
+        
+        if (op == TK_PERIOD || op == TK_SAFE_NAV) {
+            // Handle a.b or a?.b member access
+            if (!match(TK_IDENT)) {
+                error("Expected member name after '.'");
+                return expr;
+            }
+            
+            ASTNode* node = newNode(NODE_MEMBER_ACCESS);
+            if (node) {
+                node->op_type = op;
+                node->left = expr;
+                node->right = newIdentNode(previous.value.str_val);
+                expr = node;
+            }
+        } else if (op == TK_LBRACKET) {
+            // Handle a[b] index access
+            ASTNode* index = expression();
+            if (!match(TK_RBRACKET)) {
+                error("Expected ']' after index");
+                return expr;
+            }
+            
+            ASTNode* node = newNode(NODE_ARRAY_ACCESS);
+            if (node) {
+                node->op_type = TK_LBRACKET;
+                node->left = expr;
+                node->right = index;
+                expr = node;
+            }
+        }
+    }
+    
+    return expr;
 }
 
 static ASTNode* primary() {
@@ -315,44 +436,14 @@ static ASTNode* primary() {
     if (match(TK_FALSE)) return newBoolNode(false);
     if (match(TK_NULL)) return newNode(NODE_NULL);
     if (match(TK_UNDEFINED)) return newNode(NODE_UNDEFINED);
+    if (match(TK_NAN)) return newNode(NODE_NAN);
+    if (match(TK_INF)) return newNode(NODE_INF);
     
     if (match(TK_INT)) return newIntNode(previous.value.int_val);
     if (match(TK_FLOAT)) return newFloatNode(previous.value.float_val);
     if (match(TK_STRING)) return newStringNode(previous.value.str_val);
     
     if (match(TK_IDENT)) {
-        // Check for function call
-        if (match(TK_LPAREN)) {
-            ASTNode* node = newNode(NODE_FUNC_CALL);
-            if (!node) return NULL;
-            
-            node->data.name = str_copy(previous.value.str_val);
-            
-            // Parse arguments
-            ASTNode* args = NULL;
-            ASTNode* current_arg = NULL;
-            
-            if (!match(TK_RPAREN)) {
-                ASTNode* first_arg = expression();
-                args = first_arg;
-                current_arg = first_arg;
-                
-                while (match(TK_COMMA)) {
-                    ASTNode* next_arg = expression();
-                    if (current_arg) {
-                        current_arg->right = next_arg;
-                        current_arg = next_arg;
-                    }
-                }
-                
-                if (!match(TK_RPAREN)) {
-                    error("Expected ')' after arguments");
-                }
-            }
-            
-            node->left = args;  // Arguments chain
-            return node;
-        }
         return newIdentNode(previous.value.str_val);
     }
     
@@ -391,7 +482,7 @@ static ASTNode* primary() {
     }
     
     if (match(TK_LBRACKET)) {
-        // List literal
+        // List/Array literal
         ASTNode* node = newNode(NODE_LIST);
         ASTNode* current_elem = NULL;
         
@@ -417,18 +508,71 @@ static ASTNode* primary() {
     }
     
     if (match(TK_LBRACE)) {
-        // Object literal (simplified)
-        ASTNode* node = newNode(NODE_BLOCK);  // Temporary, use as object
-        printf("\033[1;33m[NOTE]\033[0m Object literals not fully implemented yet\n");
+        // Object/Map/JSON literal
+        ASTNode* node = newNode(NODE_MAP);
         
         if (!match(TK_RBRACE)) {
-            // Skip object content for now
-            while (!check(TK_RBRACE) && !check(TK_EOF)) {
-                advance();
-            }
+            ASTNode* first_pair = NULL;
+            ASTNode* current_pair = NULL;
+            
+            do {
+                // Parse key
+                char* key = NULL;
+                if (match(TK_STRING)) {
+                    key = str_copy(previous.value.str_val);
+                } else if (match(TK_IDENT)) {
+                    key = str_copy(previous.value.str_val);
+                } else {
+                    error("Expected string or identifier as object key");
+                    break;
+                }
+                
+                if (!match(TK_COLON)) {
+                    error("Expected ':' after object key");
+                    free(key);
+                    break;
+                }
+                
+                // Parse value
+                ASTNode* value = expression();
+                
+                // Create key-value pair (store in assignment node for now)
+                ASTNode* pair = newNode(NODE_ASSIGN);
+                if (pair) {
+                    pair->data.name = key;
+                    pair->left = value;
+                }
+                
+                if (!first_pair) {
+                    first_pair = pair;
+                    current_pair = pair;
+                } else {
+                    current_pair->right = pair;
+                    current_pair = pair;
+                }
+                
+            } while (match(TK_COMMA));
+            
             if (!match(TK_RBRACE)) {
                 error("Expected '}' after object");
             }
+            
+            node->left = first_pair;
+        }
+        return node;
+    }
+    
+    // JSON literal with json keyword
+    if (match(TK_JSON)) {
+        if (!match(TK_STRING)) {
+            error("Expected JSON string after 'json'");
+            return NULL;
+        }
+        
+        ASTNode* node = newNode(NODE_JSON);
+        if (node) {
+            node->data.data_literal.data = str_copy(previous.value.str_val);
+            node->data.data_literal.format = str_copy("json");
         }
         return node;
     }
@@ -438,7 +582,7 @@ static ASTNode* primary() {
 }
 
 // ======================================================
-// [SECTION] WELD STATEMENT
+// [SECTION] WELD STATEMENT (INPUT)
 // ======================================================
 static ASTNode* weldStatement() {
     ASTNode* node = newNode(NODE_WELD);
@@ -449,6 +593,7 @@ static ASTNode* weldStatement() {
         return NULL;
     }
     
+    // Optional prompt
     if (!match(TK_RPAREN)) {
         node->left = expression();
         if (!match(TK_RPAREN)) {
@@ -473,6 +618,120 @@ static ASTNode* passStatement() {
         error("Expected ';' after pass");
     }
     return newNode(NODE_PASS);
+}
+
+// ======================================================
+// [SECTION] TYPEDEF DECLARATION
+// ======================================================
+static ASTNode* typedefDeclaration() {
+    ASTNode* node = newNode(NODE_TYPEDEF);
+    
+    if (!match(TK_IDENT)) {
+        error("Expected type name after typedef");
+        free(node);
+        return NULL;
+    }
+    
+    node->data.name = str_copy(previous.value.str_val);
+    
+    if (!match(TK_ASSIGN)) {
+        error("Expected '=' in typedef");
+        free(node->data.name);
+        free(node);
+        return NULL;
+    }
+    
+    // Parse type expression (simplified)
+    if (match(TK_TYPE_INT) || match(TK_TYPE_FLOAT) || 
+        match(TK_TYPE_STR) || match(TK_TYPE_BOOL)) {
+        // Store type name
+        printf("%s[TYPEDEF]%s Type '%s' defined\n", 
+               COLOR_CYAN, COLOR_RESET, node->data.name);
+    } else {
+        error("Expected type specification");
+        free(node->data.name);
+        free(node);
+        return NULL;
+    }
+    
+    if (!match(TK_SEMICOLON)) {
+        error("Expected ';' after typedef");
+    }
+    
+    return node;
+}
+
+// ======================================================
+// [SECTION] CLASS DECLARATION
+// ======================================================
+static ASTNode* classDeclaration() {
+    ASTNode* node = newNode(NODE_CLASS);
+    
+    if (!match(TK_IDENT)) {
+        error("Expected class name");
+        free(node);
+        return NULL;
+    }
+    
+    node->data.class_def.name = str_copy(previous.value.str_val);
+    
+    // Optional inheritance
+    if (match(TK_COLON)) {
+        if (!match(TK_IDENT)) {
+            error("Expected parent class name");
+            free(node->data.class_def.name);
+            free(node);
+            return NULL;
+        }
+        node->data.class_def.parent = newIdentNode(previous.value.str_val);
+    }
+    
+    if (!match(TK_LBRACE)) {
+        error("Expected '{' before class body");
+        free(node->data.class_def.name);
+        free(node);
+        return NULL;
+    }
+    
+    // Parse class members
+    ASTNode* first_member = NULL;
+    ASTNode* current_member = NULL;
+    
+    while (!check(TK_RBRACE) && !check(TK_EOF)) {
+        ASTNode* member = NULL;
+        
+        // Parse member (simplified - just variable declarations for now)
+        if (match(TK_VAR) || match(TK_LET) || match(TK_CONST)) {
+            member = variableDeclaration();
+        } else if (match(TK_FUNC)) {
+            member = functionDeclaration();
+        } else {
+            error("Expected class member");
+            advance();
+            continue;
+        }
+        
+        if (member) {
+            if (!first_member) {
+                first_member = member;
+                current_member = member;
+            } else {
+                current_member->right = member;
+                current_member = member;
+            }
+        }
+    }
+    
+    if (!match(TK_RBRACE)) {
+        error("Expected '}' after class body");
+    }
+    
+    node->data.class_def.members = first_member;
+    
+    printf("%s[CLASS]%s Class '%s' defined\n", 
+           COLOR_MAGENTA, COLOR_RESET, node->data.class_def.name);
+    
+    return node;
 }
 
 // ======================================================
@@ -580,6 +839,7 @@ static ASTNode* block();
 static ASTNode* ifStatement();
 static ASTNode* whileStatement();
 static ASTNode* forStatement();
+static ASTNode* forInStatement();
 static ASTNode* returnStatement();
 static ASTNode* printStatement();
 static ASTNode* variableDeclaration();
@@ -592,7 +852,23 @@ static ASTNode* statement() {
     if (match(TK_PASS)) return passStatement();
     if (match(TK_IF)) return ifStatement();
     if (match(TK_WHILE)) return whileStatement();
-    if (match(TK_FOR)) return forStatement();
+    if (match(TK_FOR)) {
+        // Check if it's for-in or regular for
+        Token saved = current;
+        initLexer(current.start); // Reset to check
+        
+        // Simple heuristic: if next is IDENT and then IN, it's for-in
+        advance(); // Skip 'for'
+        if (match(TK_IDENT) && match(TK_IN)) {
+            // It's for-in
+            initLexer(saved.start);
+            return forInStatement();
+        } else {
+            // Regular for
+            initLexer(saved.start);
+            return forStatement();
+        }
+    }
     if (match(TK_RETURN)) return returnStatement();
     if (match(TK_LBRACE)) return block();
     
@@ -648,7 +924,6 @@ static ASTNode* ifStatement() {
         return NULL;
     }
     
-    match(TK_THEN);
     node->right = statement();
     
     if (match(TK_ELSE)) {
@@ -716,6 +991,44 @@ static ASTNode* forStatement() {
     }
     
     node->data.loop.body = statement();
+    
+    return node;
+}
+
+static ASTNode* forInStatement() {
+    ASTNode* node = newNode(NODE_FOR_IN);
+    
+    if (!match(TK_LPAREN)) {
+        error("Expected '(' after 'for'");
+        free(node);
+        return NULL;
+    }
+    
+    if (!match(TK_IDENT)) {
+        error("Expected variable name in for-in loop");
+        free(node);
+        return NULL;
+    }
+    
+    node->data.for_in.var_name = str_copy(previous.value.str_val);
+    
+    if (!match(TK_IN)) {
+        error("Expected 'in' in for-in loop");
+        free(node->data.for_in.var_name);
+        free(node);
+        return NULL;
+    }
+    
+    node->data.for_in.iterable = expression();
+    
+    if (!match(TK_RPAREN)) {
+        error("Expected ')' after for-in expression");
+        free(node->data.for_in.var_name);
+        free(node);
+        return NULL;
+    }
+    
+    node->data.for_in.body = statement();
     
     return node;
 }
@@ -792,7 +1105,7 @@ static ASTNode* variableDeclaration() {
     
     node->data.name = varName;
     
-    if (match(TK_ASSIGN) || match(TK_DARROW) || match(TK_LDARROW) || match(TK_RDARROW)) {
+    if (match(TK_ASSIGN)) {
         node->left = expression();
     }
     
@@ -820,7 +1133,7 @@ static ASTNode* functionDeclaration() {
         return NULL;
     }
     
-    // Parse parameters (simplified - just names)
+    // Parse parameters
     char** params = NULL;
     int param_count = 0;
     
@@ -877,7 +1190,7 @@ static ASTNode* functionDeclaration() {
     
     node->data.name = func_name;
     
-    // Store parameters in left child as linked list of identifiers
+    // Store parameters
     if (param_count > 0) {
         ASTNode* param_list = NULL;
         ASTNode* current_param = NULL;
@@ -897,35 +1210,37 @@ static ASTNode* functionDeclaration() {
         }
         free(params);
         
-        node->left = param_list;  // Parameters in left
+        node->left = param_list;
     }
     
     // Parse function body
     scope_level++;
-    node->right = block();  // Function body in right
+    node->right = block();
     scope_level--;
     
-    printf("\033[1;32m[FUNC]\033[0m Function '%s' declared with %d parameters\n", 
-           func_name, param_count);
+    printf("%s[FUNC]%s Function '%s' declared with %d parameters\n", 
+           COLOR_GREEN, COLOR_RESET, func_name, param_count);
     
     return node;
 }
 
 // ======================================================
-// [SECTION] MAIN DECLARATION
+// [SECTION] MAIN DECLARATION (IMPROVED)
 // ======================================================
 static ASTNode* mainDeclaration() {
+    ASTNode* node = newNode(NODE_MAIN);
+    
     if (!match(TK_LPAREN)) {
         error("Expected '(' after main");
+        free(node);
         return NULL;
     }
     
     if (!match(TK_RPAREN)) {
         error("Expected ')' after '('");
+        free(node);
         return NULL;
     }
-    
-    ASTNode* node = newNode(NODE_MAIN);
     
     if (!match(TK_LBRACE)) {
         error("Expected '{' before main body");
@@ -934,6 +1249,8 @@ static ASTNode* mainDeclaration() {
     }
     
     node->left = block();
+    
+    printf("%s[MAIN]%s Main function parsed\n", COLOR_BLUE, COLOR_RESET);
     
     return node;
 }
@@ -952,13 +1269,15 @@ static ASTNode* dbvarCommand() {
 }
 
 // ======================================================
-// [SECTION] DECLARATION PARSING
+// [SECTION] DECLARATION PARSING (COMPLETE)
 // ======================================================
 static ASTNode* declaration() {
     if (match(TK_MAIN)) return mainDeclaration();
     if (match(TK_DBVAR)) return dbvarCommand();
     if (match(TK_IMPORT)) return parseImport();
     if (match(TK_EXPORT)) return parseExport();
+    if (match(TK_CLASS)) return classDeclaration();
+    if (match(TK_TYPEDEF)) return typedefDeclaration();
     
     if (match(TK_FUNC)) return functionDeclaration();
     
@@ -979,15 +1298,16 @@ ASTNode** parse(const char* source, int* count) {
     hadError = false;
     panicMode = false;
     errorCount = 0;
+    scope_level = 0;
     
-    printf("\033[1;36m[PARSER]\033[0m Starting parse...\n");
+    printf("%s[PARSER]%s Starting parse...\n", COLOR_CYAN, COLOR_RESET);
     
-    int capacity = 10;
+    int capacity = 50;
     ASTNode** nodes = malloc(capacity * sizeof(ASTNode*));
     *count = 0;
     
     if (!nodes) {
-        printf("\033[1;31m[PARSER]\033[0m Memory allocation failed\n");
+        printf("%s[PARSER]%s Memory allocation failed\n", COLOR_RED, COLOR_RESET);
         return NULL;
     }
     
@@ -996,7 +1316,7 @@ ASTNode** parse(const char* source, int* count) {
             capacity *= 2;
             ASTNode** new_nodes = realloc(nodes, capacity * sizeof(ASTNode*));
             if (!new_nodes) {
-                printf("\033[1;31m[PARSER]\033[0m Memory reallocation failed\n");
+                printf("%s[PARSER]%s Memory reallocation failed\n", COLOR_RED, COLOR_RESET);
                 break;
             }
             nodes = new_nodes;
@@ -1005,23 +1325,23 @@ ASTNode** parse(const char* source, int* count) {
         ASTNode* node = declaration();
         if (node) {
             nodes[(*count)++] = node;
-            printf("\033[1;32m[PARSER]\033[0m Parsed node type %d\n", node->type);
         } else {
-            printf("\033[1;33m[PARSER]\033[0m Failed to parse declaration\n");
+            printf("%s[PARSER]%s Failed to parse declaration\n", COLOR_YELLOW, COLOR_RESET);
         }
         
         if (panicMode) {
-            printf("\033[1;33m[PARSER]\033[0m Panic mode - synchronizing\n");
+            printf("%s[PARSER]%s Panic mode - synchronizing\n", COLOR_YELLOW, COLOR_RESET);
             synchronize();
         }
     }
     
-    printf("\033[1;36m[PARSER]\033[0m Parse complete. %d nodes parsed.\n", *count);
+    printf("%s[PARSER]%s Parse complete. %d nodes parsed.\n", 
+           COLOR_CYAN, COLOR_RESET, *count);
     
     if (hadError) {
-        printf("\033[1;31m[PARSER]\033[0m Parse completed with errors\n");
+        printf("%s[PARSER]%s Parse completed with errors\n", COLOR_RED, COLOR_RESET);
     } else {
-        printf("\033[1;32m[PARSER]\033[0m Parse successful\n");
+        printf("%s[PARSER]%s Parse successful\n", COLOR_GREEN, COLOR_RESET);
     }
     
     return nodes;
