@@ -60,7 +60,7 @@ typedef enum {
     
     // Operators
     TK_PLUS, TK_MINUS, TK_MULT, TK_DIV, TK_MOD,
-    TK_POW, TK_CONCAT, TK_SPREAD,
+    TK_POW, TK_CONCAT, TK_SPREAD, TK_NULLISH,
     
     // Assignment operators
     TK_ASSIGN, TK_EQ, TK_NEQ, TK_GT, TK_LT, TK_GTE, TK_LTE,
