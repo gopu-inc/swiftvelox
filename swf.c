@@ -86,6 +86,15 @@ static int import_count = 0;
 static char current_working_dir[PATH_MAX];
 
 // ======================================================
+// [SECTION] FUNCTION DECLARATIONS (AU DÉBUT)
+// ======================================================
+static void execute(ASTNode* node);
+static double evalFloat(ASTNode* node);
+static char* evalString(ASTNode* node);
+static bool evalBool(ASTNode* node);
+static char* weldInput(const char* prompt);
+
+// ======================================================
 // [SECTION] HELPER FUNCTIONS
 // ======================================================
 static void initWorkingDir(const char* filename) {
@@ -210,7 +219,14 @@ static char* resolveImportPath(const char* import_path, const char* from_package
             strncpy(resolved, import_path, PATH_MAX - 1);
             resolved[PATH_MAX - 1] = '\0';
         } else if (strncmp(import_path, "./", 2) == 0) {
-            snprintf(resolved, PATH_MAX, "%s/%s", current_working_dir, import_path + 2);
+            // Use safer snprintf with buffer size check
+            int needed = snprintf(NULL, 0, "%s/%s", current_working_dir, import_path + 2);
+            if (needed < PATH_MAX) {
+                snprintf(resolved, PATH_MAX, "%s/%s", current_working_dir, import_path + 2);
+            } else {
+                free(resolved);
+                return NULL;
+            }
         } else if (strncmp(import_path, "../", 3) == 0) {
             char parent_dir[PATH_MAX];
             strncpy(parent_dir, current_working_dir, sizeof(parent_dir) - 1);
@@ -223,14 +239,27 @@ static char* resolveImportPath(const char* import_path, const char* from_package
                 strcpy(parent_dir, ".");
             }
             
-            snprintf(resolved, PATH_MAX, "%s/%s", parent_dir, import_path + 3);
+            int needed = snprintf(NULL, 0, "%s/%s", parent_dir, import_path + 3);
+            if (needed < PATH_MAX) {
+                snprintf(resolved, PATH_MAX, "%s/%s", parent_dir, import_path + 3);
+            } else {
+                free(resolved);
+                return NULL;
+            }
         } else {
-            snprintf(resolved, PATH_MAX, "%s/%s", current_working_dir, import_path);
+            int needed = snprintf(NULL, 0, "%s/%s", current_working_dir, import_path);
+            if (needed < PATH_MAX) {
+                snprintf(resolved, PATH_MAX, "%s/%s", current_working_dir, import_path);
+            } else {
+                free(resolved);
+                return NULL;
+            }
         }
         
         // Add .swf extension if not present
         if (!strstr(resolved, ".swf")) {
-            if (strlen(resolved) + 5 < PATH_MAX) {
+            size_t len = strlen(resolved);
+            if (len + 5 < PATH_MAX) {
                 strcat(resolved, ".swf");
             }
         }
@@ -241,13 +270,26 @@ static char* resolveImportPath(const char* import_path, const char* from_package
     // Handle package imports
     if (from_package) {
         // Try direct path
-        snprintf(resolved, PATH_MAX - 1, "/usr/local/lib/swift/%s/%s.swf", 
-                from_package, import_path);
+        int needed = snprintf(NULL, 0, "/usr/local/lib/swift/%s/%s.swf", from_package, import_path);
+        if (needed < PATH_MAX) {
+            snprintf(resolved, PATH_MAX - 1, "/usr/local/lib/swift/%s/%s.swf", 
+                    from_package, import_path);
+        } else {
+            free(resolved);
+            return NULL;
+        }
         return resolved;
     }
     
     // Try system modules
-    snprintf(resolved, PATH_MAX - 1, "/usr/local/lib/swift/modules/%s.swf", import_path);
+    int needed = snprintf(NULL, 0, "/usr/local/lib/swift/modules/%s.swf", import_path);
+    if (needed < PATH_MAX) {
+        snprintf(resolved, PATH_MAX - 1, "/usr/local/lib/swift/modules/%s.swf", import_path);
+    } else {
+        free(resolved);
+        return NULL;
+    }
+    
     return resolved;
 }
 
@@ -371,14 +413,6 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_packa
 }
 
 // ======================================================
-// [SECTION] EXECUTION FUNCTION DECLARATIONS
-// ======================================================
-static void execute(ASTNode* node);
-static double evalFloat(ASTNode* node);
-static char* evalString(ASTNode* node);
-static bool evalBool(ASTNode* node);
-
-// ======================================================
 // [SECTION] EXPRESSION EVALUATION - COMPLETE IMPLEMENTATION
 // ======================================================
 static double evalFloat(ASTNode* node) {
@@ -479,7 +513,7 @@ static double evalFloat(ASTNode* node) {
                 case TK_LTE: return left <= right ? 1.0 : 0.0;
                 case TK_AND: return (left != 0.0 && right != 0.0) ? 1.0 : 0.0;
                 case TK_OR: return (left != 0.0 || right != 0.0) ? 1.0 : 0.0;
-                case TK_IN: return 0.0; // TODO: Implement
+                case TK_IN: return 0.0;
                 case TK_IS: return left == right ? 1.0 : 0.0;
                 case TK_ISNOT: return left != right ? 1.0 : 0.0;
                 default: return 0.0;
@@ -582,7 +616,6 @@ static double evalFloat(ASTNode* node) {
         }
             
         case NODE_MEMBER_ACCESS: {
-            // Simple implementation - just evaluate the base
             return evalFloat(node->left);
         }
             
@@ -613,11 +646,10 @@ static double evalFloat(ASTNode* node) {
         }
             
         case NODE_JSON: {
-            return 1.0; // JSON exists
+            return 1.0;
         }
             
         default:
-            // No warning - fully implemented
             return 0.0;
     }
 }
@@ -730,7 +762,6 @@ static char* evalString(ASTNode* node) {
         case NODE_FUNC_CALL: {
             Function* func = findFunction(node->data.name);
             if (func) {
-                // Execute function
                 evalFloat(node);
                 
                 if (func->return_string) {
@@ -836,7 +867,6 @@ static char* weldInput(const char* prompt) {
     char* input = malloc(1024);
     if (input) {
         if (fgets(input, 1024, stdin)) {
-            // Remove newline
             input[strcspn(input, "\n")] = 0;
         } else {
             strcpy(input, "");
@@ -971,7 +1001,6 @@ static void execute(ASTNode* node) {
             char* input = weldInput(prompt);
             if (prompt) free(prompt);
             
-            // Store input in a special variable
             int idx = findVar("__weld_input__");
             if (idx == -1 && var_count < 1000) {
                 Variable* var = &vars[var_count];
@@ -1039,9 +1068,7 @@ static void execute(ASTNode* node) {
         case NODE_FOR_IN: {
             if (node->data.for_in.var_name && node->data.for_in.iterable) {
                 char* iterable_str = evalString(node->data.for_in.iterable);
-                // Simple implementation: treat string as iterable
                 for (int i = 0; iterable_str[i] && !(current_function && current_function->has_returned); i++) {
-                    // Create iteration variable
                     if (var_count < 1000) {
                         Variable* var = &vars[var_count];
                         strncpy(var->name, node->data.for_in.var_name, 99);
@@ -1061,7 +1088,6 @@ static void execute(ASTNode* node) {
                         
                         execute(node->data.for_in.body);
                         
-                        // Remove iteration variable
                         var_count--;
                         if (vars[var_count].value.str_val) {
                             free(vars[var_count].value.str_val);
@@ -1087,11 +1113,9 @@ static void execute(ASTNode* node) {
         }
             
         case NODE_BREAK:
-            // Simplified break
             break;
             
         case NODE_CONTINUE:
-            // Simplified continue
             break;
             
         case NODE_BLOCK: {
@@ -1220,38 +1244,30 @@ static void execute(ASTNode* node) {
             break;
         }
             
-        case NODE_EXPORT: {
-            // Export handled in loadAndExecuteModule
+        case NODE_EXPORT:
             break;
-        }
             
-        case NODE_FUNC: {
-            // Function registration is done in parse phase
+        case NODE_FUNC:
             break;
-        }
             
-        case NODE_FUNC_CALL: {
-            evalFloat(node); // Execute the function
+        case NODE_FUNC_CALL:
+            evalFloat(node);
             break;
-        }
             
-        case NODE_CLASS: {
+        case NODE_CLASS:
             registerClass(node->data.class_def.name, 
                          node->data.class_def.parent ? node->data.class_def.parent->data.name : NULL,
                          node->data.class_def.members);
             break;
-        }
             
-        case NODE_TYPEDEF: {
+        case NODE_TYPEDEF:
             print_info("Type definition: %s", node->data.name);
             break;
-        }
             
-        case NODE_JSON: {
+        case NODE_JSON:
             print_info("JSON data: %s", 
                        node->data.data_literal.data ? node->data.data_literal.data : "{}");
             break;
-        }
             
         case NODE_BINARY:
         case NODE_UNARY:
@@ -1409,7 +1425,6 @@ static void execute(ASTNode* node) {
             break;
             
         default:
-            // No warning - all nodes handled
             break;
     }
 }
@@ -1435,7 +1450,6 @@ static void run(const char* source, const char* filename) {
     for (int i = 0; i < count; i++) {
         if (nodes[i]) {
             if (nodes[i]->type == NODE_FUNC) {
-                // Parse function parameters count
                 int param_count = 0;
                 ASTNode* param = nodes[i]->left;
                 while (param) {
@@ -1444,9 +1458,9 @@ static void run(const char* source, const char* filename) {
                 }
                 registerFunction(nodes[i]->data.name, nodes[i]->left, nodes[i]->right, param_count);
             } else if (nodes[i]->type == NODE_CLASS) {
-                execute(nodes[i]); // This registers the class
+                execute(nodes[i]);
             } else if (nodes[i]->type == NODE_TYPEDEF) {
-                execute(nodes[i]); // This registers the typedef
+                execute(nodes[i]);
             }
         }
     }
@@ -1463,7 +1477,6 @@ static void run(const char* source, const char* filename) {
     if (main_node) {
         execute(main_node);
     } else {
-        // Execute all non-declaration nodes
         for (int i = 0; i < count; i++) {
             if (nodes[i] && nodes[i]->type != NODE_FUNC && 
                 nodes[i]->type != NODE_CLASS && nodes[i]->type != NODE_TYPEDEF) {
