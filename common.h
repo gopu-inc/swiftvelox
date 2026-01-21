@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/stat.h>
-
+#include <stdarg.h>
 // ======================================================
 // [SECTION] ANSI COLOR CODES
 // ======================================================
