@@ -13,6 +13,14 @@
 #include <ctype.h>
 #include "common.h"
 
+// ======================================================
+// [SECTION] EXECUTION FUNCTION DECLARATIONS
+// ======================================================
+static void execute(ASTNode* node);
+static double evalFloat(ASTNode* node);
+static char* evalString(ASTNode* node);
+
+
 extern ASTNode** parse(const char* source, int* count);
 
 // ======================================================
@@ -351,12 +359,6 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_packa
     return true;
 }
 
-// ======================================================
-// [SECTION] EXECUTION FUNCTION DECLARATIONS
-// ======================================================
-static void execute(ASTNode* node);
-static double evalFloat(ASTNode* node);
-static char* evalString(ASTNode* node);
 
 // ======================================================
 // [SECTION] EXPRESSION EVALUATION
