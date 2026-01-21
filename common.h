@@ -10,100 +10,135 @@
 #include <sys/stat.h>
 
 // ======================================================
-// [SECTION] COULEURS POUR LE TERMINAL
+// [SECTION] ANSI COLOR CODES
 // ======================================================
-#define RED     "\033[1;31m"
-#define GREEN   "\033[1;32m"
-#define YELLOW  "\033[1;33m"
-#define BLUE    "\033[1;34m"
-#define MAGENTA "\033[1;35m"
-#define CYAN    "\033[1;36m"
-#define RESET   "\033[0m"
+#define COLOR_RESET   "\033[0m"
+#define COLOR_BLACK   "\033[30m"
+#define COLOR_RED     "\033[31m"
+#define COLOR_GREEN   "\033[32m"
+#define COLOR_YELLOW  "\033[33m"
+#define COLOR_BLUE    "\033[34m"
+#define COLOR_MAGENTA "\033[35m"
+#define COLOR_CYAN    "\033[36m"
+#define COLOR_WHITE   "\033[37m"
+#define COLOR_BRIGHT_BLACK   "\033[90m"
+#define COLOR_BRIGHT_RED     "\033[91m"
+#define COLOR_BRIGHT_GREEN   "\033[92m"
+#define COLOR_BRIGHT_YELLOW  "\033[93m"
+#define COLOR_BRIGHT_BLUE    "\033[94m"
+#define COLOR_BRIGHT_MAGENTA "\033[95m"
+#define COLOR_BRIGHT_CYAN    "\033[96m"
+#define COLOR_BRIGHT_WHITE   "\033[97m"
+
+#define BG_BLACK   "\033[40m"
+#define BG_RED     "\033[41m"
+#define BG_GREEN   "\033[42m"
+#define BG_YELLOW  "\033[43m"
+#define BG_BLUE    "\033[44m"
+#define BG_MAGENTA "\033[45m"
+#define BG_CYAN    "\033[46m"
+#define BG_WHITE   "\033[47m"
+
+#define STYLE_BOLD      "\033[1m"
+#define STYLE_DIM       "\033[2m"
+#define STYLE_ITALIC    "\033[3m"
+#define STYLE_UNDERLINE "\033[4m"
+#define STYLE_BLINK     "\033[5m"
+#define STYLE_REVERSE   "\033[7m"
 
 // ======================================================
-// [SECTION] TOKEN DEFINITIONS - COMPLET
+// [SECTION] TOKEN DEFINITIONS - COMPLETE
 // ======================================================
 typedef enum {
     // Literals
     TK_INT, TK_FLOAT, TK_STRING, TK_TRUE, TK_FALSE,
-    TK_NULL, TK_UNDEFINED,
+    TK_NULL, TK_UNDEFINED, TK_NAN, TK_INF,
     
     // Identifiers
-    TK_IDENT,
-    TK_AS,
-    
+    TK_IDENT, TK_AS, TK_OF,
     
     // Operators
     TK_PLUS, TK_MINUS, TK_MULT, TK_DIV, TK_MOD,
-    TK_POW, TK_CONCAT,
+    TK_POW, TK_CONCAT, TK_SPREAD,
     
     // Assignment operators
     TK_ASSIGN, TK_EQ, TK_NEQ, TK_GT, TK_LT, TK_GTE, TK_LTE,
     TK_PLUS_ASSIGN, TK_MINUS_ASSIGN, TK_MULT_ASSIGN, 
-    TK_DIV_ASSIGN, TK_MOD_ASSIGN,
+    TK_DIV_ASSIGN, TK_MOD_ASSIGN, TK_POW_ASSIGN,
+    TK_CONCAT_ASSIGN,
     
     // Logical operators
     TK_AND, TK_OR, TK_NOT,
     
     // Bitwise operators
     TK_BIT_AND, TK_BIT_OR, TK_BIT_XOR, TK_BIT_NOT,
-    TK_SHL, TK_SHR,
+    TK_SHL, TK_SHR, TK_USHR,
     
     // Special operators
     TK_RARROW, TK_DARROW, TK_LDARROW, TK_RDARROW,
-    TK_SPACESHIP, TK_ELLIPSIS, TK_RANGE,
-    TK_QUESTION, TK_SCOPE,
+    TK_SPACESHIP, TK_ELLIPSIS, TK_RANGE, TK_RANGE_INCL,
+    TK_QUESTION, TK_SCOPE, TK_SAFE_NAV,
     
-    // New operators
-    TK_IN, TK_IS, TK_ISNOT,
+    // Type operators
+    TK_IN, TK_IS, TK_ISNOT, TK_AS_OP,
     
     // Punctuation
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE,
     TK_LBRACKET, TK_RBRACKET,
     TK_COMMA, TK_SEMICOLON, TK_COLON, TK_PERIOD,
-    TK_AT, TK_HASH, TK_DOLLAR,
+    TK_AT, TK_HASH, TK_DOLLAR, TK_BACKTICK,
     
     // Keywords
     TK_VAR, TK_LET, TK_CONST,
     TK_NET, TK_CLOG, TK_DOS, TK_SEL,
-    TK_THEN,
+    TK_THEN, TK_DO,
     
     // Control flow
     TK_IF, TK_ELSE, TK_ELIF,
-    TK_WHILE, TK_FOR, TK_DO,
-    TK_SWITCH, TK_CASE, TK_DEFAULT,
-    TK_BREAK, TK_CONTINUE, TK_RETURN,
+    TK_WHILE, TK_FOR, TK_SWITCH, TK_CASE, TK_DEFAULT,
+    TK_BREAK, TK_CONTINUE, TK_RETURN, TK_YIELD,
+    
+    // Error handling
+    TK_TRY, TK_CATCH, TK_FINALLY, TK_THROW,
     
     // Functions & Modules
     TK_FUNC, TK_IMPORT, TK_EXPORT, TK_FROM,
-    TK_CLASS, TK_STRUCT, TK_ENUM, TK_TYPEDEF,
-    TK_TYPELOCK, TK_NAMESPACE,
+    TK_CLASS, TK_STRUCT, TK_ENUM, TK_INTERFACE,
+    TK_TYPEDEF, TK_TYPELOCK, TK_NAMESPACE,
     
     // Types
     TK_TYPE_INT, TK_TYPE_FLOAT, TK_TYPE_STR,
     TK_TYPE_BOOL, TK_TYPE_CHAR, TK_TYPE_VOID,
-    TK_TYPE_ANY, TK_TYPE_AUTO,
+    TK_TYPE_ANY, TK_TYPE_AUTO, TK_TYPE_UNKNOWN,
     TK_TYPE_NET, TK_TYPE_CLOG, TK_TYPE_DOS,
-    TK_TYPE_SEL,
+    TK_TYPE_SEL, TK_TYPE_ARRAY, TK_TYPE_MAP,
+    TK_TYPE_FUNC,
     
     // Memory & Size
     TK_SIZEOF, TK_SIZE, TK_SIZ,
     TK_NEW, TK_DELETE, TK_FREE,
     
     // Debug & DB
-    TK_DB, TK_DBVAR, TK_PRINT_DB,
+    TK_DB, TK_DBVAR, TK_PRINT_DB, TK_ASSERT,
     
     // I/O
-    TK_PRINT, TK_WELD,  // weld remplace input
+    TK_PRINT, TK_WELD, TK_READ, TK_WRITE,
     
-    // New keywords (tous)
-    TK_PASS, TK_GLOBAL, TK_TRY, TK_LAMBDA,
+    // New keywords
+    TK_PASS, TK_GLOBAL, TK_LAMBDA,
     TK_BDD, TK_DEF, TK_TYPE, TK_RAISE,
-    TK_YIELD, TK_WITH, TK_WRITE, TK_READ, 
-    TK_LEARN, TK_NONLOCAL, TK_LOCK, TK_APPEND,
+    TK_WITH, TK_LEARN, TK_NONLOCAL, TK_LOCK, 
+    TK_APPEND, TK_PUSH, TK_POP,
+    
+    // JSON & Data
+    TK_JSON, TK_YAML, TK_XML,
     
     // Special
-    TK_MAIN, TK_THIS, TK_SELF,
+    TK_MAIN, TK_THIS, TK_SELF, TK_SUPER,
+    TK_STATIC, TK_PUBLIC, TK_PRIVATE, TK_PROTECTED,
+    
+    // Async
+    TK_ASYNC, TK_AWAIT,
     
     // End markers
     TK_EOF, TK_ERROR
@@ -140,20 +175,25 @@ static const Keyword keywords[] = {
     {"while", TK_WHILE}, {"for", TK_FOR}, {"do", TK_DO},
     {"switch", TK_SWITCH}, {"case", TK_CASE}, {"default", TK_DEFAULT},
     {"break", TK_BREAK}, {"continue", TK_CONTINUE}, {"return", TK_RETURN},
-    {"then", TK_THEN},
+    {"then", TK_THEN}, {"yield", TK_YIELD},
+    
+    // Error handling
+    {"try", TK_TRY}, {"catch", TK_CATCH}, {"finally", TK_FINALLY},
+    {"throw", TK_THROW},
     
     // Functions
     {"func", TK_FUNC}, {"import", TK_IMPORT}, {"export", TK_EXPORT},
     {"from", TK_FROM}, {"class", TK_CLASS}, {"struct", TK_STRUCT},
-    {"enum", TK_ENUM}, {"typedef", TK_TYPEDEF}, {"typelock", TK_TYPELOCK},
-    {"namespace", TK_NAMESPACE},
+    {"enum", TK_ENUM}, {"interface", TK_INTERFACE}, {"typedef", TK_TYPEDEF},
+    {"typelock", TK_TYPELOCK}, {"namespace", TK_NAMESPACE},
     
     // Types
     {"int", TK_TYPE_INT}, {"float", TK_TYPE_FLOAT}, {"string", TK_TYPE_STR},
     {"bool", TK_TYPE_BOOL}, {"char", TK_TYPE_CHAR}, {"void", TK_TYPE_VOID},
-    {"any", TK_TYPE_ANY}, {"auto", TK_TYPE_AUTO},
+    {"any", TK_TYPE_ANY}, {"auto", TK_TYPE_AUTO}, {"unknown", TK_TYPE_UNKNOWN},
     {"netvar", TK_TYPE_NET}, {"clogvar", TK_TYPE_CLOG}, 
     {"dosvar", TK_TYPE_DOS}, {"selvar", TK_TYPE_SEL},
+    {"array", TK_TYPE_ARRAY}, {"map", TK_TYPE_MAP}, {"func", TK_TYPE_FUNC},
     
     // Memory
     {"sizeof", TK_SIZEOF}, {"size", TK_SIZE}, {"siz", TK_SIZ},
@@ -161,34 +201,44 @@ static const Keyword keywords[] = {
     
     // Debug
     {"db", TK_DB}, {"dbvar", TK_DBVAR}, {"printdb", TK_PRINT_DB},
+    {"assert", TK_ASSERT},
     
     // I/O
-    {"print", TK_PRINT}, {"weld", TK_WELD},
+    {"print", TK_PRINT}, {"weld", TK_WELD}, {"read", TK_READ},
+    {"write", TK_WRITE},
     
-    // New keywords (tous)
-    {"pass", TK_PASS}, {"global", TK_GLOBAL}, {"try", TK_TRY},
-    {"lambda", TK_LAMBDA}, {"bdd", TK_BDD}, {"def", TK_DEF},
-    {"type", TK_TYPE}, {"raise", TK_RAISE}, {"yield", TK_YIELD},
-    {"with", TK_WITH}, {"write", TK_WRITE}, {"read", TK_READ},
-    {"learn", TK_LEARN}, {"nonlocal", TK_NONLOCAL}, {"lock", TK_LOCK},
-    {"append", TK_APPEND},
+    // New keywords
+    {"pass", TK_PASS}, {"global", TK_GLOBAL}, {"lambda", TK_LAMBDA},
+    {"bdd", TK_BDD}, {"def", TK_DEF}, {"type", TK_TYPE}, 
+    {"raise", TK_RAISE}, {"with", TK_WITH}, {"learn", TK_LEARN},
+    {"nonlocal", TK_NONLOCAL}, {"lock", TK_LOCK}, {"append", TK_APPEND},
+    {"push", TK_PUSH}, {"pop", TK_POP},
+    
+    // JSON & Data
+    {"json", TK_JSON}, {"yaml", TK_YAML}, {"xml", TK_XML},
     
     // Operators as keywords
-    {"in", TK_IN}, {"is", TK_IS}, {"isnot", TK_ISNOT},
+    {"in", TK_IN}, {"is", TK_IS}, {"isnot", TK_ISNOT}, {"as", TK_AS_OP},
+    {"of", TK_OF},
     
     // Special
     {"main", TK_MAIN}, {"this", TK_THIS}, {"self", TK_SELF},
+    {"super", TK_SUPER}, {"static", TK_STATIC}, {"public", TK_PUBLIC},
+    {"private", TK_PRIVATE}, {"protected", TK_PROTECTED},
+    
+    // Async
+    {"async", TK_ASYNC}, {"await", TK_AWAIT},
     
     // Literals
     {"true", TK_TRUE}, {"false", TK_FALSE}, {"null", TK_NULL},
-    {"undefined", TK_UNDEFINED},
+    {"undefined", TK_UNDEFINED}, {"nan", TK_NAN}, {"inf", TK_INF},
     
     // End marker
     {NULL, TK_ERROR}
 };
 
 // ======================================================
-// [SECTION] AST NODE DEFINITIONS - COMPLET
+// [SECTION] AST NODE DEFINITIONS - COMPLETE
 // ======================================================
 typedef enum {
     // Expressions
@@ -199,23 +249,37 @@ typedef enum {
     NODE_IDENT,
     NODE_NULL,
     NODE_UNDEFINED,
+    NODE_NAN,
+    NODE_INF,
     NODE_LIST,
+    NODE_MAP,
     NODE_FUNC,
     NODE_FUNC_CALL,
-
+    NODE_LAMBDA,
+    NODE_ARRAY_ACCESS,
+    NODE_MEMBER_ACCESS,
     
     // Operations
     NODE_BINARY,
     NODE_UNARY,
+    NODE_TERNARY,
     NODE_ASSIGN,
+    NODE_COMPOUND_ASSIGN,
     
     // Control flow
     NODE_IF,
     NODE_WHILE,
     NODE_FOR,
+    NODE_FOR_IN,
+    NODE_SWITCH,
+    NODE_CASE,
     NODE_RETURN,
+    NODE_YIELD,
     NODE_BREAK,
     NODE_CONTINUE,
+    NODE_THROW,
+    NODE_TRY,
+    NODE_CATCH,
     
     // Variables
     NODE_VAR_DECL,
@@ -224,39 +288,64 @@ typedef enum {
     NODE_DOS_DECL,
     NODE_SEL_DECL,
     NODE_CONST_DECL,
+    NODE_GLOBAL_DECL,
     
     // Memory
     NODE_SIZEOF,
+    NODE_NEW,
+    NODE_DELETE,
     
     // Modules
     NODE_IMPORT,
     NODE_EXPORT,
+    NODE_MODULE,
     
     // Debug
     NODE_DBVAR,
+    NODE_ASSERT,
     
     // I/O
     NODE_PRINT,
     NODE_WELD,
-    
-    // New nodes (tous)
-    NODE_PASS,
-    NODE_GLOBAL,
-    NODE_TRY,
-    NODE_LAMBDA,
-    NODE_WITH,
-    NODE_YIELD,
-    NODE_APPEND,
-    NODE_WRITE,
     NODE_READ,
+    NODE_WRITE,
+    
+    // New nodes
+    NODE_PASS,
+    NODE_WITH,
     NODE_LEARN,
     NODE_LOCK,
+    NODE_APPEND,
+    NODE_PUSH,
+    NODE_POP,
+    
+    // OOP
+    NODE_CLASS,
+    NODE_STRUCT,
+    NODE_ENUM,
+    NODE_INTERFACE,
+    NODE_TYPEDEF,
+    NODE_NAMESPACE,
+    NODE_NEW_INSTANCE,
+    NODE_METHOD_CALL,
+    NODE_PROPERTY_ACCESS,
+    
+    // JSON & Data
+    NODE_JSON,
+    NODE_YAML,
+    NODE_XML,
+    
+    // Async
+    NODE_ASYNC,
+    NODE_AWAIT,
     
     // Blocks
     NODE_BLOCK,
+    NODE_SCOPE,
     
     // Special
     NODE_MAIN,
+    NODE_PROGRAM,
     NODE_EMPTY
 } NodeType;
 
@@ -308,11 +397,58 @@ typedef struct ASTNode {
             struct ASTNode* body;
         } loop;
         
+        // For-in loop
+        struct {
+            char* var_name;
+            struct ASTNode* iterable;
+            struct ASTNode* body;
+        } for_in;
+        
         // Append operation
         struct {
             struct ASTNode* list;
             struct ASTNode* value;
         } append_op;
+        
+        // Push/Pop
+        struct {
+            struct ASTNode* collection;
+            struct ASTNode* value;
+        } collection_op;
+        
+        // Try-Catch
+        struct {
+            struct ASTNode* try_block;
+            struct ASTNode* catch_block;
+            struct ASTNode* finally_block;
+            char* error_var;
+        } try_catch;
+        
+        // Class/Struct
+        struct {
+            char* name;
+            struct ASTNode* parent;
+            struct ASTNode* members;
+        } class_def;
+        
+        // Switch-Case
+        struct {
+            struct ASTNode* expr;
+            struct ASTNode* cases;
+            struct ASTNode* default_case;
+        } switch_stmt;
+        
+        // Case
+        struct {
+            struct ASTNode* value;
+            struct ASTNode* body;
+        } case_stmt;
+        
+        // JSON/Data
+        struct {
+            char* data;
+            char* format;
+        } data_literal;
     } data;
     
     // Additional info
@@ -342,4 +478,50 @@ static inline char* str_ncopy(const char* src, int n) {
     return dest;
 }
 
-#endif
+// Color printing functions
+static inline void print_color(const char* color, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    printf("%s", color);
+    vprintf(format, args);
+    printf("%s", COLOR_RESET);
+    va_end(args);
+}
+
+static inline void print_error(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    printf("%s[ERROR]%s ", COLOR_RED, COLOR_RESET);
+    vprintf(format, args);
+    printf("\n");
+    va_end(args);
+}
+
+static inline void print_warning(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    printf("%s[WARNING]%s ", COLOR_YELLOW, COLOR_RESET);
+    vprintf(format, args);
+    printf("\n");
+    va_end(args);
+}
+
+static inline void print_info(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    printf("%s[INFO]%s ", COLOR_CYAN, COLOR_RESET);
+    vprintf(format, args);
+    printf("\n");
+    va_end(args);
+}
+
+static inline void print_success(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    printf("%s[SUCCESS]%s ", COLOR_GREEN, COLOR_RESET);
+    vprintf(format, args);
+    printf("\n");
+    va_end(args);
+}
+
+#endif // COMMON_H
