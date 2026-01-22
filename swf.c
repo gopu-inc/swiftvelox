@@ -1050,27 +1050,66 @@ static void execute(ASTNode* node) {
         }
         
         case NODE_ASSIGN: {
+    printf("%s[EXEC DEBUG]%s Entering NODE_ASSIGN case\n", COLOR_YELLOW, COLOR_RESET);
+    
     if (node->data.name) {
+        printf("%s[EXEC DEBUG]%s Assigning to variable: %s\n", COLOR_YELLOW, COLOR_RESET, node->data.name);
+        
         int idx = findVar(node->data.name);
         if (idx >= 0) {
+            printf("%s[EXEC DEBUG]%s Found variable at index %d\n", COLOR_YELLOW, COLOR_RESET, idx);
+            
             if (vars[idx].is_constant) {
                 printf("%s[EXEC ERROR]%s Cannot assign to constant '%s'\n", COLOR_RED, COLOR_RESET, node->data.name);
                 break;
             }
             
-            // Évaluer l'expression à droite du '='
             if (node->left) {
-                double new_value = evalFloat(node->left);  // CORRECTION ICI
+                printf("%s[EXEC DEBUG]%s Evaluating right-hand expression\n", COLOR_YELLOW, COLOR_RESET);
+                
+                // Évaluer l'expression complète
+                double new_value = evalFloat(node->left);
+                
+                printf("%s[EXEC DEBUG]%s New value: %f\n", COLOR_YELLOW, COLOR_RESET, new_value);
+                
+                // Mettre à jour la variable
                 vars[idx].is_initialized = true;
                 vars[idx].is_float = true;
                 vars[idx].is_string = false;
                 vars[idx].value.float_val = new_value;
                 
-                printf("%s[DEBUG]%s Assign: %s = %f\n", COLOR_YELLOW, COLOR_RESET, node->data.name, new_value);
+                printf("%s[EXEC DEBUG]%s Assignment complete: %s = %f\n", 
+                       COLOR_GREEN, COLOR_RESET, node->data.name, new_value);
+            } else {
+                printf("%s[EXEC ERROR]%s No expression to assign\n", COLOR_RED, COLOR_RESET);
             }
         } else {
             printf("%s[EXEC ERROR]%s Variable '%s' not found\n", COLOR_RED, COLOR_RESET, node->data.name);
+            
+            // Créer la variable si elle n'existe pas
+            if (var_count < MAX_VARIABLES) {
+                Variable* var = &vars[var_count];
+                strncpy(var->name, node->data.name, sizeof(var->name) - 1);
+                var->type = TK_VAR;
+                var->scope_level = scope_level;
+                var->is_constant = false;
+                var->is_initialized = false;
+                
+                if (node->left) {
+                    double new_value = evalFloat(node->left);
+                    var->is_initialized = true;
+                    var->is_float = true;
+                    var->value.float_val = new_value;
+                    
+                    printf("%s[EXEC DEBUG]%s Created new variable: %s = %f\n", 
+                           COLOR_GREEN, COLOR_RESET, node->data.name, new_value);
+                }
+                
+                var_count++;
+            }
         }
+    } else {
+        printf("%s[EXEC ERROR]%s No variable name in assignment\n", COLOR_RED, COLOR_RESET);
     }
     break;
 }
