@@ -548,26 +548,31 @@ static double evalFloat(ASTNode* node) {
             return strtod(node->data.str_val, &endptr);
         }
         case NODE_IDENT: {
-            int idx = findVar(node->data.name);
-            if (idx >= 0) {
-                printf("[DEBUG evalFloat] Reading var '%s' = ", node->data.name);
-        
-                if (vars[idx].is_float) {
-                    printf("%f\n", vars[idx].value.float_val);
-                   return vars[idx].value.float_val;
-              } else if (vars[idx].is_string) {
-                  printf("\"%s\"\n", vars[idx].value.str_val);
-            // Conversion string vers float
-                  char* endptr;
-                  double val = strtod(vars[idx].value.str_val, &endptr);
-                  return val;
-              } else {
-                  printf("%lld\n", vars[idx].value.int_val);
-                  return (double)vars[idx].value.int_val;
-         }
+    printf("[CRITICAL DEBUG] Reading variable: %s\n", node->data.name);
+    int idx = findVar(node->data.name);
+    if (idx >= 0) {
+        double val;
+        if (vars[idx].is_float) {
+            val = vars[idx].value.float_val;
+            printf("[CRITICAL DEBUG] Found %s as float: %f\n", node->data.name, val);
+        } else if (vars[idx].is_string) {
+            val = 0.0; // Conversion simplifiée
+            printf("[CRITICAL DEBUG] Found %s as string\n", node->data.name);
+        } else {
+            val = (double)vars[idx].value.int_val;
+            printf("[CRITICAL DEBUG] Found %s as int: %lld -> %f\n", 
+                   node->data.name, vars[idx].value.int_val, val);
+        }
+        return val;
     }
-        printf("[DEBUG evalFloat] Variable '%s' NOT FOUND\n", node->data.name);
-        return 0.0;
+    printf("[CRITICAL DEBUG] Variable %s NOT FOUND\n", node->data.name);
+    return 0.0;
+}
+
+case NODE_INT: {
+    double val = (double)node->data.int_val;
+    printf("[CRITICAL DEBUG] Integer literal: %lld -> %f\n", node->data.int_val, val);
+    return val;
 }
         case NODE_BINARY: {
     printf("[DEBUG BINARY] Starting binary operation, operator type: %d\n", node->op_type);
