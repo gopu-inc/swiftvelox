@@ -1114,6 +1114,8 @@ static void execute(ASTNode* node) {
     break;
 }
         case NODE_COMPOUND_ASSIGN: {
+    printf("%s[EXEC DEBUG]%s Entering NODE_COMPOUND_ASSIGN case\n", COLOR_YELLOW, COLOR_RESET);
+    
     if (node->data.name) {
         int idx = findVar(node->data.name);
         if (idx >= 0) {
@@ -1127,9 +1129,14 @@ static void execute(ASTNode* node) {
                 current_value = vars[idx].value.float_val;
             } else {
                 current_value = (double)vars[idx].value.int_val;
-            }
+        }
             
+            printf("%s[EXEC DEBUG]%s Current value: %f, Operator: %d\n", 
+                   COLOR_YELLOW, COLOR_RESET, current_value, node->op_type);
+            
+            // CORRECTION : utiliser node->right
             double right_value = evalFloat(node->right);
+            
             double new_value = current_value;
             
             switch (node->op_type) {
@@ -1137,14 +1144,28 @@ static void execute(ASTNode* node) {
                 case TK_MINUS_ASSIGN: new_value = current_value - right_value; break;
                 case TK_MULT_ASSIGN: new_value = current_value * right_value; break;
                 case TK_DIV_ASSIGN: new_value = current_value / right_value; break;
+                case TK_MOD_ASSIGN: new_value = fmod(current_value, right_value); break;
+                case TK_POW_ASSIGN: new_value = pow(current_value, right_value); break;
+                case TK_CONCAT_ASSIGN: {
+                    // Pour les strings
+                    char* left_str = evalString(node->left); // Pourrait être le nœud original
+                    char* right_str = evalString(node->right);
+                    char* combined = malloc(strlen(left_str) + strlen(right_str) + 1);
+                    strcpy(combined, left_str);
+                    strcat(combined, right_str);
+                    free(left_str);
+                    free(right_str);
+                    // Stocker comme string...
+                    break;
+                }
                 default: break;
             }
             
             vars[idx].is_float = true;
             vars[idx].value.float_val = new_value;
             
-            printf("%s[DEBUG]%s Compound assign: %s op=%d %f -> %f\n", 
-                   COLOR_YELLOW, COLOR_RESET, node->data.name, node->op_type, current_value, new_value);
+            printf("%s[EXEC DEBUG]%s Compound assign: %s %f -> %f\n", 
+                   COLOR_GREEN, COLOR_RESET, node->data.name, current_value, new_value);
         }
     }
     break;
