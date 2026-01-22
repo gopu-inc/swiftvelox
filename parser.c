@@ -218,6 +218,7 @@ static ASTNode* assignment() {
         
         TokenKind op = previous.kind;
         
+        // Déclarer is_compound AVANT de l'utiliser
         bool is_compound = false;
         if (op == TK_PLUS_ASSIGN || op == TK_MINUS_ASSIGN || 
             op == TK_MULT_ASSIGN || op == TK_DIV_ASSIGN ||
@@ -253,7 +254,7 @@ static ASTNode* assignment() {
             printf("  Target: %s (type: %d)\n", 
                    expr->type == NODE_IDENT && expr->data.name ? expr->data.name : "unknown",
                    expr->type);
-            printf("  Value type: %d\n", value ? value->type : -1);
+            printf("  Value type: %d\n", value ? (int)value->type : -1);  // Correction du warning
         }
         return node;
     }
