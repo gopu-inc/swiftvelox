@@ -1064,13 +1064,16 @@ static void execute(ASTNode* node) {
                 break;
             }
             
-            if (node->left) {
-                printf("%s[EXEC DEBUG]%s Evaluating right-hand expression\n", COLOR_YELLOW, COLOR_RESET);
+            // CORRECTION : utiliser node->right (la valeur) au lieu de node->left
+            if (node->right) {
+                printf("%s[EXEC DEBUG]%s Evaluating right-hand expression (type: %d)\n", 
+                       COLOR_YELLOW, COLOR_RESET, node->right->type);
                 
-                // Évaluer l'expression complète
-                double new_value = evalFloat(node->left);
+                // Évaluer l'expression à droite du '='
+                double new_value = evalFloat(node->right);
                 
-                printf("%s[EXEC DEBUG]%s New value: %f\n", COLOR_YELLOW, COLOR_RESET, new_value);
+                printf("%s[EXEC DEBUG]%s New value: %f (old was: %f)\n", 
+                       COLOR_YELLOW, COLOR_RESET, new_value, vars[idx].value.float_val);
                 
                 // Mettre à jour la variable
                 vars[idx].is_initialized = true;
@@ -1087,23 +1090,20 @@ static void execute(ASTNode* node) {
             printf("%s[EXEC ERROR]%s Variable '%s' not found\n", COLOR_RED, COLOR_RESET, node->data.name);
             
             // Créer la variable si elle n'existe pas
-            if (var_count < MAX_VARIABLES) {
+            if (var_count < MAX_VARIABLES && node->right) {
                 Variable* var = &vars[var_count];
                 strncpy(var->name, node->data.name, sizeof(var->name) - 1);
                 var->type = TK_VAR;
                 var->scope_level = scope_level;
                 var->is_constant = false;
-                var->is_initialized = false;
                 
-                if (node->left) {
-                    double new_value = evalFloat(node->left);
-                    var->is_initialized = true;
-                    var->is_float = true;
-                    var->value.float_val = new_value;
-                    
-                    printf("%s[EXEC DEBUG]%s Created new variable: %s = %f\n", 
-                           COLOR_GREEN, COLOR_RESET, node->data.name, new_value);
-                }
+                double new_value = evalFloat(node->right);
+                var->is_initialized = true;
+                var->is_float = true;
+                var->value.float_val = new_value;
+                
+                printf("%s[EXEC DEBUG]%s Created new variable: %s = %f\n", 
+                       COLOR_GREEN, COLOR_RESET, node->data.name, new_value);
                 
                 var_count++;
             }
