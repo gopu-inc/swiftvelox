@@ -322,6 +322,156 @@ static char* resolveImportPath(const char* import_path, const char* from_package
     free(resolved);
     return NULL;
 }
+// ======================================================
+// [SECTION] NATIVE IO FUNCTIONS
+// ======================================================
+
+static char* __native_readfile(const char* filename) {
+    FILE* f = fopen(filename, "r");
+    if (!f) return NULL;
+    
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    char* content = malloc(size + 1);
+    if (content) {
+        fread(content, 1, size, f);
+        content[size] = '\0';
+    }
+    
+    fclose(f);
+    return content;
+}
+
+static bool __native_writefile(const char* filename, const char* content, bool append) {
+    FILE* f = fopen(filename, append ? "a" : "w");
+    if (!f) return false;
+    
+    fwrite(content, 1, strlen(content), f);
+    fclose(f);
+    return true;
+}
+
+static bool __native_fileexists(const char* filename) {
+    return access(filename, F_OK) == 0;
+}
+
+static long __native_filesize(const char* filename) {
+    struct stat st;
+    if (stat(filename, &st) == 0) {
+        return st.st_size;
+    }
+    return -1;
+}
+
+static bool __native_isfile(const char* filename) {
+    struct stat st;
+    if (stat(filename, &st) == 0) {
+        return S_ISREG(st.st_mode);
+    }
+    return false;
+}
+
+static bool __native_isdir(const char* path) {
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        return S_ISDIR(st.st_mode);
+    }
+    return false;
+}
+
+static bool __native_mkdir(const char* path) {
+    return mkdir(path, 0755) == 0;
+}
+
+static bool __native_rmdir(const char* path) {
+    return rmdir(path) == 0;
+}
+
+static bool __native_remove(const char* filename) {
+    return remove(filename) == 0;
+}
+
+static bool __native_rename(const char* oldname, const char* newname) {
+    return rename(oldname, newname) == 0;
+}
+
+static char** __native_listdir(const char* path, int* count) {
+    DIR* dir = opendir(path);
+    if (!dir) return NULL;
+    
+    struct dirent* entry;
+    char** files = NULL;
+    int capacity = 10;
+    int size = 0;
+    
+    files = malloc(capacity * sizeof(char*));
+    
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip . and ..
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        
+        if (size >= capacity) {
+            capacity *= 2;
+            files = realloc(files, capacity * sizeof(char*));
+        }
+        
+        files[size] = str_copy(entry->d_name);
+        size++;
+    }
+    
+    closedir(dir);
+    *count = size;
+    return files;
+}
+
+static long __native_timestamp() {
+    return time(NULL);
+}
+
+static int __native_random() {
+    return rand();
+}
+
+static char* __native_tobase64(const char* input) {
+    // Simple base64 simulation
+    static const char* base64_chars = 
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    
+    size_t len = strlen(input);
+    size_t output_len = 4 * ((len + 2) / 3);
+    char* output = malloc(output_len + 1);
+    
+    if (!output) return NULL;
+    
+    // Simple simulation - just encode first few chars
+    for (size_t i = 0; i < len && i < 20; i++) {
+        output[i] = base64_chars[input[i] % 64];
+    }
+    output[len < 20 ? len : 20] = '\0';
+    
+    return output;
+}
+
+static char* __native_frombase64(const char* input) {
+    // Simple base64 simulation - just return copy
+    return str_copy(input);
+}
+
+static char* __native_tojson(void* obj, bool pretty) {
+    // Simple JSON serialization
+    // In a real implementation, you would serialize the AST
+    return str_copy("{}");
+}
+
+static void* __native_parsejson(const char* json) {
+    // Simple JSON parsing
+    // In a real implementation, you would parse to AST
+    return NULL;
+}
 
 static bool loadAndExecuteModule(const char* import_path, const char* from_package) {
     char* full_path = resolveImportPath(import_path, from_package);
