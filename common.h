@@ -87,7 +87,7 @@ typedef enum {
     // Error handling
     TK_TRY, TK_CATCH, TK_FINALLY, TK_THROW,
     
-    // Functions & Modules
+   // Functions & Modules
     TK_FUNC, TK_IMPORT, TK_EXPORT, TK_FROM,
     TK_CLASS, TK_STRUCT, TK_ENUM, TK_INTERFACE,
     TK_TYPEDEF, TK_TYPELOCK, TK_NAMESPACE,
@@ -98,10 +98,9 @@ typedef enum {
     TK_TYPE_ANY, TK_TYPE_AUTO, TK_TYPE_UNKNOWN,
     TK_TYPE_NET, TK_TYPE_CLOG, TK_TYPE_DOS,
     TK_TYPE_SEL, TK_TYPE_ARRAY, TK_TYPE_MAP,
-    TK_TYPE_FUNC, TK_INCREMENT, 
+    TK_TYPE_FUNC, TK_DECREMENT, TK_INCREMENT, TK_TYPEOF,
     
-    TK_DECREMENT, TK_TYPEOF,
-// Memory & Size
+    // Memory & Size
     TK_SIZEOF, TK_SIZE, TK_SIZ,
     TK_NEW, TK_DELETE, TK_FREE,
     
@@ -230,7 +229,6 @@ static const Keyword keywords[] = {
 typedef enum {
     // Expressions
     NODE_INT,
-    NODE_TYPE,
     NODE_FLOAT,
     NODE_STRING,
     NODE_BOOL,
@@ -240,6 +238,7 @@ typedef enum {
     NODE_NAN,
     NODE_INF,
     NODE_LIST,
+    NODE_TYPE,
     NODE_MAP,
     NODE_FUNC,
     NODE_FUNC_CALL,
