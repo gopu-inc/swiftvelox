@@ -381,7 +381,14 @@ static ASTNode* bitwiseXor() {
     
     return expr;
 }
-
+static ASTNode* caseStatement() {
+    // Cette fonction semble être une déclaration mais pas utilisée
+    // Soit l'implémenter, soit la supprimer de la déclaration
+    
+    // Pour l'instant, retourner NULL
+    warningAt(current, "caseStatement not implemented");
+    return NULL;
+}
 // Bitwise AND
 static ASTNode* bitwiseAnd() {
     ASTNode* expr = equality();
