@@ -1,5 +1,9 @@
+/*
 [file name]: parser.c
 [file content begin]
+*/
+
+
 #include "parser.h"
 #include "common.h"
 #include <stdio.h>
