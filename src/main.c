@@ -165,11 +165,13 @@ void process_args(int argc, char** argv) {
         } else if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--server") == 0) {
             // Server mode
             config->input_file = str_copy("server");
+            
+        // process_args
         } else if (strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--run") == 0) {
             if (i + 1 < argc) {
                 config->input_file = str_copy("-inline-");
-                // Store code in a special way
-                // We'll handle this in main execution
+                // On saute l'argument suivant pour qu'il ne soit pas pris comme un fichier
+                i++; 
             }
         } else if (strcmp(argv[i], "--stdin") == 0) {
             config->input_file = str_copy("-");
