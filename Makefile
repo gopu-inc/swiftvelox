@@ -24,7 +24,19 @@ OBJS = $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 # Binary
 TARGET = $(BIN_DIR)/swiftflow
-
+# Dans votre Makefile, ajoutez :
+ifeq ($(OS),Windows_NT)
+    CFLAGS += -D_WIN32
+else
+    UNAME_S := $(shell uname -s)
+    ifeq ($(UNAME_S),Linux)
+        CFLAGS += -D_POSIX_C_SOURCE=199309L
+        LDLIBS += -lrt
+    endif
+    ifeq ($(UNAME_S),Darwin)
+        CFLAGS += -D_DARWIN_C_SOURCE
+    endif
+endif
 # Default target
 all: directories $(TARGET)
 
