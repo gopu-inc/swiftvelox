@@ -222,17 +222,18 @@ ASTNode* parse_statement(Parser* parser) {
     }
 }
 
-// Dans src/parser.c
+// [src/parser.c] - REMPLACER LA FONCTION EXISTANTE PAR CELLE-CI
 
 ASTNode* parse_print_statement(Parser* parser) {
     int line = parser->previous.line;
     int column = parser->previous.column;
     
     // On crée un nœud LIST pour stocker tous les arguments
+    // Cela permet de gérer: print("x =", x);
     ASTNode* args_list = ast_new_node(NODE_LIST, line, column);
     ASTNode** next_arg = &args_list->left;
 
-    // On parse au moins une expression
+    // On parse au moins une expression, puis on boucle tant qu'il y a des virgules
     do {
         ASTNode* expr = parse_expression(parser);
         if (!expr) {
@@ -241,11 +242,11 @@ ASTNode* parse_print_statement(Parser* parser) {
         }
         
         *next_arg = expr;
-        next_arg = &expr->right; // Chainage des arguments
+        next_arg = &expr->right; // Chainage des arguments via le pointeur 'right'
         
-    } while (parser_match(parser, TK_COMMA)); // Tant qu'il y a des virgules
+    } while (parser_match(parser, TK_COMMA)); // Si on trouve une virgule, on continue
     
-    // On crée le nœud PRINT avec la liste comme enfant gauche
+    // On crée le nœud PRINT et on lui attache la liste d'arguments
     ASTNode* print_node = ast_new_node(NODE_PRINT, line, column);
     print_node->left = args_list;
     
