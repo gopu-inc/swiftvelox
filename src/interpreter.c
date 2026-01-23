@@ -115,7 +115,7 @@ void value_free(Value* value) {
 }
 
 // Helper function to get string without quotes for concatenation
-static char* value_to_raw_string(Value value) {
+char* value_to_raw_string(Value value) {
     switch (value.type) {
         case VAL_STRING:
             return str_copy(value.as.str_val);  // No quotes!
