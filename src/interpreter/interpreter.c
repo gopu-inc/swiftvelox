@@ -103,6 +103,44 @@ void value_free(Value* value) {
     }
 }
 
+// Helper function to get string without quotes for concatenation
+static char* value_to_raw_string(Value value) {
+    switch (value.type) {
+        case VAL_STRING:
+            return str_copy(value.as.str_val);  // No quotes!
+        case VAL_INT:
+            return str_format("%ld", value.as.int_val);
+        case VAL_FLOAT:
+            if (isnan(value.as.float_val)) {
+                return str_copy("nan");
+            }
+            if (isinf(value.as.float_val)) {
+                return str_copy(value.as.float_val > 0 ? "inf" : "-inf");
+            }
+            return str_format("%g", value.as.float_val);
+        case VAL_BOOL:
+            return str_copy(value.as.bool_val ? "true" : "false");
+        case VAL_NULL:
+            return str_copy("null");
+        case VAL_UNDEFINED:
+            return str_copy("undefined");
+        case VAL_NAN:
+            return str_copy("nan");
+        case VAL_INF:
+            return str_copy("inf");
+        case VAL_ARRAY:
+            return str_format("[array:%d]", value.as.array.count);
+        case VAL_MAP:
+            return str_format("{map:%d}", value.as.map.count);
+        case VAL_FUNCTION:
+            return str_format("<function>");
+        case VAL_OBJECT:
+            return str_format("<object>");
+        default:
+            return str_format("<value:%d>", value.type);
+    }
+}
+
 char* value_to_string(Value value) {
     switch (value.type) {
         case VAL_INT:
@@ -328,7 +366,7 @@ typedef struct {
 
 // Built-in print function
 Value builtin_print(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
-    (void)interpreter; // Marquer comme utilisé
+    (void)interpreter; // Mark as used
     for (int i = 0; i < arg_count; i++) {
         value_print(args[i]);
         if (i < arg_count - 1) {
@@ -341,9 +379,9 @@ Value builtin_print(SwiftFlowInterpreter* interpreter, Value* args, int arg_coun
 
 // Built-in input function
 Value builtin_input(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
-    (void)interpreter; // Marquer comme utilisé
+    (void)interpreter; // Mark as used
     if (arg_count > 0) {
-        char* prompt = value_to_string(args[0]);
+        char* prompt = value_to_raw_string(args[0]);
         printf("%s", prompt);
         fflush(stdout);
         free(prompt);
@@ -560,17 +598,17 @@ Value builtin_lower(SwiftFlowInterpreter* interpreter, Value* args, int arg_coun
 
 // Built-in time function
 Value builtin_time(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
-    (void)interpreter; // Marquer comme utilisé
+    (void)interpreter; // Mark as used
     (void)args;
     (void)arg_count;
     
-    // Solution portable avec time()
+    // Portable solution with time()
     return value_make_float((double)time(NULL));
 }
 
 // Built-in exit function
 Value builtin_exit(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
-    (void)interpreter; // Marquer comme utilisé
+    (void)interpreter; // Mark as used
     int exit_code = 0;
     
     if (arg_count > 0) {
@@ -606,8 +644,17 @@ static Builtin builtins[] = {
 // ======================================================
 
 void interpreter_error(SwiftFlowInterpreter* interpreter, const char* message, int line, int column) {
+    if (!interpreter) return;
+    
     interpreter->had_error = true;
-    FREE(interpreter->error_message);
+    
+    // Free old message if exists
+    if (interpreter->error_message) {
+        free(interpreter->error_message);
+        interpreter->error_message = NULL;
+    }
+    
+    // Allocate new message
     interpreter->error_message = str_copy(message);
     interpreter->error_line = line;
     interpreter->error_column = column;
@@ -688,6 +735,10 @@ Value call_builtin(SwiftFlowInterpreter* interpreter, const char* name, Value* a
 }
 
 Value interpreter_evaluate_binary(SwiftFlowInterpreter* interpreter, ASTNode* node, Environment* env) {
+    if (!node || !interpreter || interpreter->had_error) {
+        return value_make_null();
+    }
+    
     Value left = interpreter_evaluate(interpreter, node->left, env);
     if (interpreter->had_error) {
         value_free(&left);
@@ -706,8 +757,17 @@ Value interpreter_evaluate_binary(SwiftFlowInterpreter* interpreter, ASTNode* no
         case TK_PLUS:
             // Addition or concatenation
             if (left.type == VAL_STRING || right.type == VAL_STRING) {
-                char* left_str = value_to_string(left);
-                char* right_str = value_to_string(right);
+                char* left_str = value_to_raw_string(left);
+                char* right_str = value_to_raw_string(right);
+                if (!left_str || !right_str) {
+                    interpreter_error(interpreter, "Memory allocation failed", node->line, node->column);
+                    free(left_str);
+                    free(right_str);
+                    value_free(&left);
+                    value_free(&right);
+                    return value_make_undefined();
+                }
+                
                 char* result = str_format("%s%s", left_str, right_str);
                 Value val = value_make_string(result);
                 free(left_str);
@@ -817,10 +877,20 @@ Value interpreter_evaluate_binary(SwiftFlowInterpreter* interpreter, ASTNode* no
             break;
             
         case TK_EQ:
-            return value_make_bool(value_equal(left, right));
+            {
+                bool result = value_equal(left, right);
+                value_free(&left);
+                value_free(&right);
+                return value_make_bool(result);
+            }
             
         case TK_NEQ:
-            return value_make_bool(!value_equal(left, right));
+            {
+                bool result = !value_equal(left, right);
+                value_free(&left);
+                value_free(&right);
+                return value_make_bool(result);
+            }
             
         case TK_GT:
             if (left.type == VAL_INT && right.type == VAL_INT) {
@@ -887,10 +957,20 @@ Value interpreter_evaluate_binary(SwiftFlowInterpreter* interpreter, ASTNode* no
             break;
             
         case TK_AND:
-            return value_make_bool(value_is_truthy(left) && value_is_truthy(right));
+            {
+                bool result = value_is_truthy(left) && value_is_truthy(right);
+                value_free(&left);
+                value_free(&right);
+                return value_make_bool(result);
+            }
             
         case TK_OR:
-            return value_make_bool(value_is_truthy(left) || value_is_truthy(right));
+            {
+                bool result = value_is_truthy(left) || value_is_truthy(right);
+                value_free(&left);
+                value_free(&right);
+                return value_make_bool(result);
+            }
             
         default:
             interpreter_error(interpreter, "Unsupported binary operator", node->line, node->column);
@@ -903,8 +983,13 @@ Value interpreter_evaluate_binary(SwiftFlowInterpreter* interpreter, ASTNode* no
 }
 
 Value interpreter_evaluate_unary(SwiftFlowInterpreter* interpreter, ASTNode* node, Environment* env) {
+    if (!node || !interpreter || interpreter->had_error) {
+        return value_make_null();
+    }
+    
     Value right = interpreter_evaluate(interpreter, node->left, env);
     if (interpreter->had_error) {
+        value_free(&right);
         return value_make_null();
     }
     
@@ -922,7 +1007,11 @@ Value interpreter_evaluate_unary(SwiftFlowInterpreter* interpreter, ASTNode* nod
             break;
             
         case TK_NOT:
-            return value_make_bool(!value_is_truthy(right));
+            {
+                bool result = !value_is_truthy(right);
+                value_free(&right);
+                return value_make_bool(result);
+            }
             
         default:
             interpreter_error(interpreter, "Unsupported unary operator", node->line, node->column);
@@ -934,13 +1023,21 @@ Value interpreter_evaluate_unary(SwiftFlowInterpreter* interpreter, ASTNode* nod
 }
 
 Value interpreter_evaluate_function_call(SwiftFlowInterpreter* interpreter, ASTNode* node, Environment* env) {
+    if (!node || !interpreter || interpreter->had_error) {
+        return value_make_undefined();
+    }
+    
     // Get function name
-    if (node->left->type != NODE_IDENT) {
+    if (!node->left || node->left->type != NODE_IDENT) {
         interpreter_error(interpreter, "Expected function name", node->line, node->column);
         return value_make_undefined();
     }
     
     char* func_name = node->left->data.name;
+    if (!func_name) {
+        interpreter_error(interpreter, "Invalid function name", node->line, node->column);
+        return value_make_undefined();
+    }
     
     // Evaluate arguments
     Value* args = NULL;
@@ -950,6 +1047,11 @@ Value interpreter_evaluate_function_call(SwiftFlowInterpreter* interpreter, ASTN
     while (arg_node) {
         arg_count++;
         args = REALLOC(args, Value, arg_count);
+        if (!args) {
+            interpreter_error(interpreter, "Memory allocation failed", node->line, node->column);
+            return value_make_undefined();
+        }
+        
         args[arg_count - 1] = interpreter_evaluate(interpreter, arg_node, env);
         if (interpreter->had_error) {
             for (int i = 0; i < arg_count; i++) {
@@ -989,6 +1091,10 @@ Value interpreter_evaluate_function_call(SwiftFlowInterpreter* interpreter, ASTN
 }
 
 Value interpreter_evaluate_list(SwiftFlowInterpreter* interpreter, ASTNode* node, Environment* env) {
+    if (!node || !interpreter || interpreter->had_error) {
+        return value_make_undefined();
+    }
+    
     Value array_val;
     array_val.type = VAL_ARRAY;
     array_val.as.array.count = 0;
@@ -1006,6 +1112,10 @@ Value interpreter_evaluate_list(SwiftFlowInterpreter* interpreter, ASTNode* node
     if (count > 0) {
         array_val.as.array.capacity = count;
         array_val.as.array.elements = ALLOC_ARRAY(Value, count);
+        if (!array_val.as.array.elements) {
+            interpreter_error(interpreter, "Memory allocation failed", node->line, node->column);
+            return value_make_undefined();
+        }
         
         elem = node->left;
         int i = 0;
@@ -1029,7 +1139,7 @@ Value interpreter_evaluate_list(SwiftFlowInterpreter* interpreter, ASTNode* node
 }
 
 Value interpreter_evaluate(SwiftFlowInterpreter* interpreter, ASTNode* node, Environment* env) {
-    if (!node || interpreter->had_error) {
+    if (!node || !interpreter || interpreter->had_error) {
         return value_make_null();
     }
     
@@ -1064,9 +1174,15 @@ Value interpreter_evaluate(SwiftFlowInterpreter* interpreter, ASTNode* node, Env
             return value_make_inf();
             
         case NODE_IDENT: {
+            if (!node->data.name) {
+                interpreter_error(interpreter, "Invalid identifier", node->line, node->column);
+                return value_make_undefined();
+            }
+            
             Value value = environment_get(env, node->data.name);
             if (value.type == VAL_UNDEFINED) {
                 interpreter_error(interpreter, "Undefined variable", node->line, node->column);
+                return value_make_undefined(); // Return new undefined value
             }
             return value;
         }
@@ -1078,7 +1194,7 @@ Value interpreter_evaluate(SwiftFlowInterpreter* interpreter, ASTNode* node, Env
             return interpreter_evaluate_unary(interpreter, node, env);
             
         case NODE_ASSIGN: {
-            if (node->left->type != NODE_IDENT) {
+            if (!node->left || node->left->type != NODE_IDENT) {
                 interpreter_error(interpreter, "Invalid assignment target", node->line, node->column);
                 return value_make_undefined();
             }
@@ -1102,6 +1218,11 @@ Value interpreter_evaluate(SwiftFlowInterpreter* interpreter, ASTNode* node, Env
         case NODE_SEL_DECL:
         case NODE_CONST_DECL:
         case NODE_GLOBAL_DECL: {
+            if (!node->data.name) {
+                interpreter_error(interpreter, "Invalid variable name", node->line, node->column);
+                return value_make_undefined();
+            }
+            
             Value value;
             if (node->left) {
                 value = interpreter_evaluate(interpreter, node->left, env);
@@ -1115,11 +1236,25 @@ Value interpreter_evaluate(SwiftFlowInterpreter* interpreter, ASTNode* node, Env
         }
             
         case NODE_PRINT: {
-            Value value = interpreter_evaluate(interpreter, node->left, env);
-            if (interpreter->had_error) return value_make_null();
+            if (!node->left) {
+                // Empty print statement
+                printf("\n");
+                return value_make_null();
+            }
             
-            value_print(value);
-            printf("\n");
+            Value value = interpreter_evaluate(interpreter, node->left, env);
+            if (interpreter->had_error) {
+                value_free(&value);
+                return value_make_null();
+            }
+            
+            // Use raw string for printing (no extra quotes)
+            char* str = value_to_raw_string(value);
+            if (str) {
+                printf("%s\n", str);
+                free(str);
+            }
+            
             value_free(&value);
             return value_make_null();
         }
@@ -1144,7 +1279,10 @@ Value interpreter_evaluate(SwiftFlowInterpreter* interpreter, ASTNode* node, Env
             
         case NODE_IF: {
             Value condition = interpreter_evaluate(interpreter, node->left, env);
-            if (interpreter->had_error) return value_make_null();
+            if (interpreter->had_error) {
+                value_free(&condition);
+                return value_make_null();
+            }
             
             Value result = value_make_null();
             
@@ -1174,6 +1312,7 @@ Value interpreter_evaluate(SwiftFlowInterpreter* interpreter, ASTNode* node, Env
                 
                 Value condition = interpreter_evaluate(interpreter, node->left, env);
                 if (interpreter->had_error) {
+                    value_free(&condition);
                     value_free(&result);
                     return value_make_null();
                 }
@@ -1229,6 +1368,7 @@ Value interpreter_evaluate(SwiftFlowInterpreter* interpreter, ASTNode* node, Env
                 if (node->data.loop.condition) {
                     Value condition = interpreter_evaluate(interpreter, node->data.loop.condition, loop_env);
                     if (interpreter->had_error) {
+                        value_free(&condition);
                         value_free(&result);
                         environment_free(loop_env);
                         return value_make_null();
@@ -1351,8 +1491,10 @@ int interpreter_run(SwiftFlowInterpreter* interpreter, ASTNode* ast) {
     
     // Reset interpreter state
     interpreter->had_error = false;
-    FREE(interpreter->error_message);
-    interpreter->error_message = NULL;
+    if (interpreter->error_message) {
+        free(interpreter->error_message);
+        interpreter->error_message = NULL;
+    }
     interpreter->should_break = false;
     interpreter->should_continue = false;
     interpreter->should_return = false;
@@ -1371,6 +1513,8 @@ int interpreter_run(SwiftFlowInterpreter* interpreter, ASTNode* ast) {
 // ======================================================
 
 void interpreter_dump_environment(SwiftFlowInterpreter* interpreter) {
+    if (!interpreter) return;
+    
     printf("%s=== Global Environment ===%s\n", COLOR_CYAN, COLOR_RESET);
     
     Environment* env = interpreter->global_env;
