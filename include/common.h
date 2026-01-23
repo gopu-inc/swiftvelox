@@ -2,12 +2,15 @@
 
 
 
+
+[file name]: src/common.h
+[file content begin]
+// swiftflow v3.2.1 powered by gopu.inc
+
 #ifndef COMMON_H
 #define COMMON_H
 
-
-
-#include <time.h>
+#include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -19,6 +22,8 @@
 #include <limits.h>
 #include <errno.h>
 #include <time.h>
+#include <math.h>
+
 
 // ======================================================
 // [SECTION] VERSION & CONFIGURATION
@@ -820,3 +825,5 @@ bool config_add_import_path(SwiftFlowConfig* config, const char* path);
 char* config_resolve_import(SwiftFlowConfig* config, const char* module_name, const char* from_file);
 
 #endif // COMMON_H
+
+[file content end]
