@@ -698,6 +698,17 @@ char* config_resolve_import(SwiftFlowConfig* config, const char* module_name, co
 Value swiftflow_json_parse(const char* json_str);
 char* swiftflow_json_stringify(Value value);
 // Logging
+// Ajouter ces prototypes dans common.h:
+
+// Server functions
+void start_http_server(int port, const char* host, bool dev_mode);
+
+// JSON library function
+Value swiftflow_json_read_file(const char* filename);
+bool swiftflow_json_write_file(const char* filename, Value value);
+
+// Utility functions
+bool str_startswith(const char* str, const char* prefix);
 void swiftflow_log(LogLevel level, const char* file, int line, const char* fmt, ...);
 
 // AST functions
