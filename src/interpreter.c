@@ -718,17 +718,106 @@ void interpreter_free(SwiftFlowInterpreter* interpreter) {
 }
 
 void interpreter_register_builtins(SwiftFlowInterpreter* interpreter) {
-    for (int i = 0; builtins[i].name != NULL; i++) {
-        // Create a function value for each built-in
-        Value func_val;
-        func_val.type = VAL_FUNCTION;
-        func_val.as.function = NULL; // Built-in functions are special
-        
-        // Store the builtin index in the value
-        environment_define(interpreter->global_env, builtins[i].name, func_val);
-    }
+    if (!interpreter || !interpreter->global_env) return;
+    
+    // S'assurer que toutes les built-ins sont bien enregistrées
+    Value func_val;
+    func_val.type = VAL_FUNCTION;
+    func_val.as.function = NULL; // Built-in functions are special
+    
+    // ======================================================
+    // [SECTION] FONCTIONS DE BASE
+    // ======================================================
+    environment_define(interpreter->global_env, "print", func_val);
+    environment_define(interpreter->global_env, "input", func_val);
+    environment_define(interpreter->global_env, "length", func_val);
+    environment_define(interpreter->global_env, "typeof", func_val);
+    
+    // ======================================================
+    // [SECTION] FONCTIONS MATHÉMATIQUES
+    // ======================================================
+    environment_define(interpreter->global_env, "abs", func_val);
+    environment_define(interpreter->global_env, "sqrt", func_val);
+    environment_define(interpreter->global_env, "pow", func_val);
+    environment_define(interpreter->global_env, "round", func_val);
+    environment_define(interpreter->global_env, "floor", func_val);
+    environment_define(interpreter->global_env, "ceil", func_val);
+    
+    // ======================================================
+    // [SECTION] FONCTIONS SUR LES TABLEAUX
+    // ======================================================
+    environment_define(interpreter->global_env, "append", func_val);
+    environment_define(interpreter->global_env, "push", func_val);
+    environment_define(interpreter->global_env, "pop", func_val);
+    
+    // ======================================================
+    // [SECTION] FONCTIONS SUR LES CHAÎNES
+    // ======================================================
+    environment_define(interpreter->global_env, "upper", func_val);
+    environment_define(interpreter->global_env, "lower", func_val);
+    
+    // ======================================================
+    // [SECTION] FONCTIONS SYSTÈME
+    // ======================================================
+    environment_define(interpreter->global_env, "time", func_val);
+    environment_define(interpreter->global_env, "exit", func_val);
+    
+    // ======================================================
+    // [SECTION] FONCTIONS JSON
+    // ======================================================
+    environment_define(interpreter->global_env, "__json_parse__", func_val);
+    environment_define(interpreter->global_env, "__json_stringify__", func_val);
+    environment_define(interpreter->global_env, "__json_read_file__", func_val);
+    environment_define(interpreter->global_env, "__json_write_file__", func_val);
+    
+    // ======================================================
+    // [SECTION] FONCTIONS DE DEBUG
+    // ======================================================
+    environment_define(interpreter->global_env, "assert", func_val);
+    
+    // ======================================================
+    // [SECTION] FONCTIONS DE CONVERSION
+    // ======================================================
+    environment_define(interpreter->global_env, "int", func_val);
+    environment_define(interpreter->global_env, "float", func_val);
+    environment_define(interpreter->global_env, "str", func_val);
+    environment_define(interpreter->global_env, "bool", func_val);
+    
+    // ======================================================
+    // [SECTION] FONCTIONS DE GESTION DE FICHIERS
+    // ======================================================
+    environment_define(interpreter->global_env, "read_file", func_val);
+    environment_define(interpreter->global_env, "write_file", func_val);
+    
+    // ======================================================
+    // [SECTION] FONCTIONS AVANCÉES
+    // ======================================================
+    environment_define(interpreter->global_env, "map", func_val);
+    environment_define(interpreter->global_env, "filter", func_val);
+    environment_define(interpreter->global_env, "reduce", func_val);
+    
+    // ======================================================
+    // [SECTION] SUPPORT IMPORT/EXPORT
+    // ======================================================
+    // Ces fonctions sont utilisées par le système de modules
+    environment_define(interpreter->global_env, "__import__", func_val);
+    environment_define(interpreter->global_env, "__export__", func_val);
+    environment_define(interpreter->global_env, "__require__", func_val);
+    
+    // ======================================================
+    // [SECTION] FONCTIONS DE GESTION D'ERREURS
+    // ======================================================
+    environment_define(interpreter->global_env, "try", func_val);
+    environment_define(interpreter->global_env, "catch", func_val);
+    environment_define(interpreter->global_env, "throw", func_val);
+    
+    // ======================================================
+    // [SECTION] FONCTIONS RÉSEAU (si supportées)
+    // ======================================================
+    environment_define(interpreter->global_env, "fetch", func_val);
+    environment_define(interpreter->global_env, "http_get", func_val);
+    environment_define(interpreter->global_env, "http_post", func_val);
 }
-
 Value call_builtin(SwiftFlowInterpreter* interpreter, const char* name, Value* args, int arg_count) {
     for (int i = 0; builtins[i].name != NULL; i++) {
         if (str_equal(name, builtins[i].name)) {
