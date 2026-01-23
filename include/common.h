@@ -881,6 +881,6 @@ bool module_register(ModuleRegistry* registry, Module* module);
 SwiftFlowConfig* config_create_default(void);
 void config_free(SwiftFlowConfig* config);
 bool config_add_import_path(SwiftFlowConfig* config, const char* path);
-char* config_resolve_import(SwiftFlowConfi* config, const char* module_name, const char* from_file);
+char* config_resolve_import(SwiftFlowConfig* config, const char* module_name, const char* from_file);
 
 #endif // COMMON_H
