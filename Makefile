@@ -1,5 +1,4 @@
-[file name]: Makefile
-[file content begin]
+
 # SwiftFlow Makefile
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c99 -g -I.
@@ -30,4 +29,3 @@ test: $(TARGET)
 	./$(TARGET) test.swf
 
 .PHONY: all clean install uninstall test
-[file content end]
