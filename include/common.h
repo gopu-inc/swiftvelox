@@ -827,4 +827,6 @@ char* config_resolve_import(SwiftFlowConfig* config, const char* module_name, co
 
 #endif // COMMON_H
 
-[file content end]
+/*
+    [file content end]
+*/
