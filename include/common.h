@@ -348,6 +348,9 @@ struct Value {
 // ======================================================
 // [SECTION] AST NODE DEFINITIONS
 // ======================================================
+// ======================================================
+// [SECTION] AST NODE DEFINITIONS
+// ======================================================
 typedef enum {
     // Expressions
     NODE_INT,
@@ -406,6 +409,12 @@ typedef enum {
     NODE_GLOBAL_DECL,
     NODE_NONLOCAL_DECL,
     
+    // Memory
+    NODE_SIZEOF,
+    NODE_NEW,
+    NODE_DELETE,
+    NODE_FREE,
+    
     // Modules
     NODE_IMPORT,
     NODE_EXPORT,
@@ -444,6 +453,15 @@ typedef enum {
     NODE_CLASS_INIT,
     NODE_CLASS_METHOD,
     
+    // JSON & Data
+    NODE_JSON,
+    NODE_YAML,
+    NODE_XML,
+    
+    // Async
+    NODE_ASYNC,
+    NODE_AWAIT,
+    
     // Blocks
     NODE_BLOCK,
     NODE_SCOPE,
@@ -480,43 +498,6 @@ typedef struct ASTNode {
             struct ASTNode* body;
         } loop;
         
-        // For-in loop
-        struct {
-            char* var_name;
-            struct ASTNode* iterable;
-            struct ASTNode* body;
-        } for_in;
-        
-        // Append operation
-        struct {
-            struct ASTNode* list;
-            struct ASTNode* value;
-        } append_op;
-        
-        // Try-Catch
-        struct {
-            struct ASTNode* try_block;
-            struct ASTNode* catch_block;
-            struct ASTNode* finally_block;
-            char* error_var;
-        } try_catch;
-        
-        // Class/Struct
-        struct {
-            char* name;
-            struct ASTNode* parent;
-            struct ASTNode* members;
-            struct ASTNode* methods;
-        } class_def;
-        
-        // Function
-        struct {
-            char* name;
-            struct ASTNode* params;
-            struct ASTNode* body;
-            bool is_async;
-        } func_def;
-        
         // Function call
         struct {
             struct ASTNode* function;
@@ -524,17 +505,23 @@ typedef struct ASTNode {
             int arg_count;
         } func_call;
         
-        // Binary operation
-        struct {
-            TokenKind op;
-            struct ASTNode* left;
-            struct ASTNode* right;
-        } binary_op;
-        
         // Input
         struct {
             char* prompt;
         } input_op;
+        
+        // Import (simplifié)
+        struct {
+            char* module_name;
+            char* from_module;
+        } import_info;
+        
+        // Function definition (simplifié)
+        struct {
+            char* name;
+            struct ASTNode* params;
+            struct ASTNode* body;
+        } func_def;
     } data;
     
     // Additional info
@@ -542,7 +529,6 @@ typedef struct ASTNode {
     int column;
     TokenKind op_type;
 } ASTNode;
-
 // ======================================================
 // [SECTION] INTERPRETER STRUCTURES
 // ======================================================
