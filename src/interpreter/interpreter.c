@@ -3,7 +3,7 @@
 #include <mach/mach_time.h>
 #else
 #include <time.h>
-
+#endif
 
 #include "interpreter.h"
 #include "common.h"
