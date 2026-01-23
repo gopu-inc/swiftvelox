@@ -785,7 +785,7 @@ Token lexer_identifier(Lexer* lexer);
 void parser_init(Parser* parser, Lexer* lexer);
 ASTNode* parse_program(Parser* parser);
 ASTNode* parse_statement(Parser* parser);
-ASTNode* parse_expression(Parser* parser);
+// * ASTNode* parse_expression(Parser* parser); *//
 ASTNode* parse_block(Parser* parser);
 void parser_synchronize(Parser* parser);
 bool parser_match(Parser* parser, TokenKind kind);
