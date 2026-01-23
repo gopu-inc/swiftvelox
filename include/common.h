@@ -273,6 +273,30 @@ static const Keyword keywords[] = {
 };
 
 // ======================================================
+// [SECTION] LEXER STRUCTURE
+// ======================================================
+typedef struct {
+    const char* source;
+    const char* start;
+    const char* current;
+    int line;
+    int column;
+    Token current_token;
+    char* filename;
+} Lexer;
+
+// ======================================================
+// [SECTION] PARSER STRUCTURE
+// ======================================================
+typedef struct {
+    Lexer* lexer;
+    Token current;
+    Token previous;
+    bool had_error;
+    bool panic_mode;
+} Parser;
+
+// ======================================================
 // [SECTION] VALUE REPRESENTATION (Interpreter)
 // ======================================================
 typedef enum {
@@ -647,6 +671,31 @@ static inline bool str_endswith(const char* str, const char* suffix) {
 #define REALLOC(ptr, type, count) ((type*)realloc(ptr, sizeof(type) * (count)))
 #define FREE(ptr) do { if (ptr) { free(ptr); ptr = NULL; } } while(0)
 
+// Error checking macros
+#define CHECK_NULL(ptr, msg) \
+    do { \
+        if (!(ptr)) { \
+            fprintf(stderr, "Null pointer: %s\n", msg); \
+            return NULL; \
+        } \
+    } while(0)
+
+#define CHECK_ALLOC(ptr, msg) \
+    do { \
+        if (!(ptr)) { \
+            fprintf(stderr, "Allocation failed: %s\n", msg); \
+            exit(EXIT_FAILURE); \
+        } \
+    } while(0)
+
+#define CHECK_ERROR(cond, msg) \
+    do { \
+        if (!(cond)) { \
+            fprintf(stderr, "Error: %s\n", msg); \
+            return false; \
+        } \
+    } while(0)
+
 // ======================================================
 // [SECTION] FUNCTION PROTOTYPES
 // ======================================================
@@ -660,6 +709,27 @@ void ast_free(ASTNode* node);
 void ast_print(ASTNode* node, int indent);
 const char* node_type_to_string(NodeType type);
 const char* token_kind_to_string(TokenKind kind);
+ASTNode* ast_optimize(ASTNode* node);
+
+// AST creation functions
+ASTNode* ast_new_int(int64_t value, int line, int column);
+ASTNode* ast_new_float(double value, int line, int column);
+ASTNode* ast_new_string(const char* value, int line, int column);
+ASTNode* ast_new_bool(bool value, int line, int column);
+ASTNode* ast_new_identifier(const char* name, int line, int column);
+ASTNode* ast_new_binary(NodeType type, ASTNode* left, ASTNode* right, int line, int column);
+ASTNode* ast_new_unary(NodeType type, ASTNode* operand, int line, int column);
+ASTNode* ast_new_assignment(ASTNode* left, ASTNode* right, int line, int column);
+ASTNode* ast_new_var_decl(const char* name, ASTNode* value, TokenKind var_type, int line, int column);
+ASTNode* ast_new_if(ASTNode* condition, ASTNode* then_branch, ASTNode* else_branch, int line, int column);
+ASTNode* ast_new_while(ASTNode* condition, ASTNode* body, int line, int column);
+ASTNode* ast_new_for(ASTNode* init, ASTNode* condition, ASTNode* update, ASTNode* body, int line, int column);
+ASTNode* ast_new_function(const char* name, ASTNode* params, ASTNode* body, int line, int column);
+ASTNode* ast_new_function_call(ASTNode* function, ASTNode* args, int line, int column);
+ASTNode* ast_new_return(ASTNode* value, int line, int column);
+ASTNode* ast_new_import(char** modules, int count, const char* from_module, int line, int column);
+ASTNode* ast_new_print(ASTNode* value, int line, int column);
+ASTNode* ast_new_input(const char* prompt, int line, int column);
 
 // Value functions
 Value value_make_int(int64_t val);
@@ -668,6 +738,8 @@ Value value_make_bool(bool val);
 Value value_make_string(const char* val);
 Value value_make_null(void);
 Value value_make_undefined(void);
+Value value_make_nan(void);
+Value value_make_inf(void);
 void value_free(Value* value);
 char* value_to_string(Value value);
 void value_print(Value value);
@@ -688,20 +760,55 @@ void interpreter_free(SwiftFlowInterpreter* interpreter);
 int interpreter_run(SwiftFlowInterpreter* interpreter, ASTNode* ast);
 Value interpreter_evaluate(SwiftFlowInterpreter* interpreter, ASTNode* node, Environment* env);
 Value interpreter_execute_block(SwiftFlowInterpreter* interpreter, ASTNode* block, Environment* env);
+void interpreter_error(SwiftFlowInterpreter* interpreter, const char* message, int line, int column);
+void interpreter_register_builtins(SwiftFlowInterpreter* interpreter);
+void interpreter_dump_environment(SwiftFlowInterpreter* interpreter);
+void interpreter_dump_value(Value value);
+
+// Lexer functions
+void lexer_init(Lexer* lexer, const char* source, const char* filename);
+Token lexer_next_token(Lexer* lexer);
+Token lexer_peek_token(Lexer* lexer);
+void lexer_skip_whitespace(Lexer* lexer);
+bool lexer_is_at_end(Lexer* lexer);
+char lexer_advance(Lexer* lexer);
+char lexer_peek(Lexer* lexer);
+char lexer_peek_next(Lexer* lexer);
+bool lexer_match(Lexer* lexer, char expected);
+Token lexer_make_token(Lexer* lexer, TokenKind kind);
+Token lexer_error_token(Lexer* lexer, const char* message);
+Token lexer_string(Lexer* lexer);
+Token lexer_number(Lexer* lexer);
+Token lexer_identifier(Lexer* lexer);
+
+// Parser functions
+void parser_init(Parser* parser, Lexer* lexer);
+ASTNode* parse_program(Parser* parser);
+ASTNode* parse_statement(Parser* parser);
+ASTNode* parse_expression(Parser* parser);
+ASTNode* parse_block(Parser* parser);
+void parser_synchronize(Parser* parser);
+bool parser_match(Parser* parser, TokenKind kind);
+bool parser_check(Parser* parser, TokenKind kind);
+Token parser_consume(Parser* parser, TokenKind kind, const char* error_message);
+void parser_error(Parser* parser, Token token, const char* message);
+void parser_error_at_current(Parser* parser, const char* message);
+ASTNode* parse_import_statement(Parser* parser);
+ASTNode* parse_if_statement(Parser* parser);
+ASTNode* parse_while_statement(Parser* parser);
+ASTNode* parse_for_statement(Parser* parser);
+ASTNode* parse_var_declaration(Parser* parser);
+ASTNode* parse_function_declaration(Parser* parser);
+ASTNode* parse_class_declaration(Parser* parser);
+ASTNode* parse_switch_statement(Parser* parser);
+ASTNode* parse_try_statement(Parser* parser);
+ASTNode* parse_print_statement(Parser* parser);
+ASTNode* parse_input_statement(Parser* parser);
 
 // Configuration
 SwiftFlowConfig* config_create_default(void);
 void config_free(SwiftFlowConfig* config);
 bool config_add_import_path(SwiftFlowConfig* config, const char* path);
-
-// Lexer functions (to be defined in lexer.c)
-typedef struct Lexer Lexer;
-void lexer_init(Lexer* lexer, const char* source, const char* filename);
-Token lexer_next_token(Lexer* lexer);
-
-// Parser functions (to be defined in parser.c)
-typedef struct Parser Parser;
-void parser_init(Parser* parser, Lexer* lexer);
-ASTNode* parse_program(Parser* parser);
+char* config_resolve_import(SwiftFlowConfig* config, const char* module_name, const char* from_file);
 
 #endif // COMMON_H
