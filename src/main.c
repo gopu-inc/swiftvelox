@@ -1,12 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <libgen.h>
 #include "common.h"
 #include "lexer.h"
 #include "parser.h"
 #include "ast.h"
-#include "backend.h"
+#include "interpreter.h"
 
 // Global configuration
 SwiftFlowConfig* config = NULL;
@@ -76,28 +75,20 @@ char* read_file(const char* filename) {
 
 // Print usage information
 void print_usage(const char* program_name) {
-    printf("%sSwiftFlow Compiler/Interpreter v%s%s\n", 
+    printf("%sSwiftFlow Interpreter v%s%s\n", 
            COLOR_CYAN, SWIFTFLOW_VERSION_STRING, COLOR_RESET);
     printf("==============================================\n\n");
     printf("Usage: %s <input.swf> [options]\n\n", program_name);
     printf("Options:\n");
-    printf("  -o <file>          Output file name (default: a.out)\n");
     printf("  -v, --verbose      Verbose output\n");
     printf("  -d, --debug        Debug mode\n");
     printf("  -q, --quiet        Quiet mode (no warnings)\n");
-    printf("  -O[0-3]            Optimization level (default: 1)\n");
-    printf("  -emit-llvm         Emit LLVM IR\n");
-    printf("  -emit-asm          Emit assembly (NASM)\n");
-    printf("  -c                 Compile only, don't link\n");
     printf("  -I <path>          Add import search path\n");
-    printf("  -i, --interpret    Run in interpreter mode\n");
-    printf("  -t, --target <arch> Target architecture (x86, x64, arm)\n");
-    printf("  --stdlib <path>    Set standard library path\n");
     printf("  -h, --help         Show this help message\n\n");
     printf("Examples:\n");
-    printf("  %s program.swf -o program\n", program_name);
-    printf("  %s program.swf -i           # Run in interpreter\n", program_name);
-    printf("  %s program.swf -emit-llvm   # Generate LLVM IR\n", program_name);
+    printf("  %s program.swf\n", program_name);
+    printf("  %s program.swf -d        # Run in debug mode\n", program_name);
+    printf("  %s -                     # Read from stdin\n", program_name);
 }
 
 // Process command line arguments
@@ -105,41 +96,16 @@ void process_args(int argc, char** argv) {
     config = config_create_default();
     
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-o") == 0) {
-            if (i + 1 < argc) {
-                config->output_file = str_copy(argv[++i]);
-            }
-        } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
+        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
             config->verbose = true;
             config->debug = true;
         } else if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--debug") == 0) {
             config->debug = true;
         } else if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--quiet") == 0) {
             config->warnings = false;
-        } else if (strncmp(argv[i], "-O", 2) == 0) {
-            config->optimization_level = atoi(argv[i] + 2);
-            config->optimize = config->optimization_level > 0;
-        } else if (strcmp(argv[i], "-emit-llvm") == 0) {
-            config->emit_llvm = true;
-            config->output_format = "ll";
-        } else if (strcmp(argv[i], "-emit-asm") == 0) {
-            config->emit_asm = true;
-            config->output_format = "asm";
-        } else if (strcmp(argv[i], "-c") == 0) {
-            config->link = false;
         } else if (strcmp(argv[i], "-I") == 0) {
             if (i + 1 < argc) {
                 config_add_import_path(config, argv[++i]);
-            }
-        } else if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interpret") == 0) {
-            config->interpret = true;
-        } else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--target") == 0) {
-            if (i + 1 < argc) {
-                config->target_arch = str_copy(argv[++i]);
-            }
-        } else if (strcmp(argv[i], "--stdlib") == 0) {
-            if (i + 1 < argc) {
-                // This will be handled by config
             }
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
@@ -150,50 +116,43 @@ void process_args(int argc, char** argv) {
         }
     }
     
-    // Set default output file if not specified
-    if (!config->output_file && config->input_file) {
-        char* base = str_copy(config->input_file);
-        char* dot = strrchr(base, '.');
-        if (dot) *dot = '\0';
-        config->output_file = str_format("%s.out", base);
-        free(base);
+    // If no input file and no stdin indicator, show help
+    if (!config->input_file && argc == 1) {
+        print_usage(argv[0]);
+        exit(EXIT_SUCCESS);
     }
 }
 
-// Compile and execute
-int compile_and_execute() {
-    LOG(LOG_INFO, "SwiftFlow Compiler v%s", SWIFTFLOW_VERSION_STRING);
+// Read from stdin
+char* read_stdin() {
+    size_t buffer_size = 4096;
+    char* buffer = malloc(buffer_size);
+    if (!buffer) return NULL;
     
-    if (!config->input_file) {
-        LOG(LOG_ERROR, "No input file specified");
-        return 1;
+    size_t total_read = 0;
+    size_t read;
+    
+    while ((read = fread(buffer + total_read, 1, buffer_size - total_read - 1, stdin)) > 0) {
+        total_read += read;
+        if (total_read >= buffer_size - 1) {
+            buffer_size *= 2;
+            buffer = realloc(buffer, buffer_size);
+            if (!buffer) return NULL;
+        }
     }
     
-    // Check file exists
-    FILE* test = fopen(config->input_file, "r");
-    if (!test) {
-        LOG(LOG_ERROR, "Cannot open input file: %s", config->input_file);
-        return 1;
-    }
-    fclose(test);
-    
-    // Check file extension
-    if (!str_endswith(config->input_file, ".swf")) {
-        LOG(LOG_WARNING, "File extension should be .swf");
-    }
-    
-    // Read source file
-    LOG(LOG_INFO, "Reading file: %s", config->input_file);
-    char* source = read_file(config->input_file);
-    if (!source) {
-        LOG(LOG_ERROR, "Failed to read source file");
-        return 1;
-    }
+    buffer[total_read] = '\0';
+    return buffer;
+}
+
+// Interpret SwiftFlow code
+int interpret_swiftflow(const char* source, const char* filename) {
+    LOG(LOG_INFO, "SwiftFlow Interpreter v%s", SWIFTFLOW_VERSION_STRING);
     
     // Lexical analysis
     LOG(LOG_INFO, "Performing lexical analysis...");
     Lexer lexer;
-    lexer_init(&lexer, source, config->input_file);
+    lexer_init(&lexer, source, filename ? filename : "<stdin>");
     
     // Parse tokens
     LOG(LOG_INFO, "Parsing...");
@@ -203,7 +162,6 @@ int compile_and_execute() {
     ASTNode* ast = parse_program(&parser);
     if (!ast || parser.had_error) {
         LOG(LOG_ERROR, "Parsing failed");
-        free(source);
         return 1;
     }
     
@@ -217,7 +175,7 @@ int compile_and_execute() {
     
     // Optimize AST if requested
     if (config->optimize) {
-        LOG(LOG_INFO, "Optimizing AST (level %d)...", config->optimization_level);
+        LOG(LOG_INFO, "Optimizing AST...");
         ASTNode* optimized = ast_optimize(ast);
         if (optimized != ast) {
             ast_free(ast);
@@ -225,60 +183,65 @@ int compile_and_execute() {
         }
     }
     
-    // If in interpreter mode, run directly
-    if (config->interpret) {
-        LOG(LOG_INFO, "Running in interpreter mode...");
-        // TODO: Implement interpreter
-        printf("%s[INTERPRETER]%s Interpreter mode not yet implemented\n", 
-               COLOR_YELLOW, COLOR_RESET);
-    } else {
-        // Choose backend based on flags
-        BackendTarget target = BACKEND_LLVM;
-        if (config->emit_asm) {
-            target = BACKEND_NASM;
-        } else if (config->interpret) {
-            target = BACKEND_INTERPRETER;
-        }
-        
-        // Compile
-        LOG(LOG_INFO, "Compiling with %s backend...", 
-            target == BACKEND_LLVM ? "LLVM" : 
-            target == BACKEND_NASM ? "NASM" : "Interpreter");
-        
-        BackendContext* backend = backend_create(target, config->output_file);
-        if (!backend) {
-            LOG(LOG_ERROR, "Failed to create backend");
-            ast_free(ast);
-            free(source);
-            return 1;
-        }
-        
-        backend_compile(backend, ast);
-        backend_free(backend);
-        
-        LOG(LOG_INFO, "Compilation completed: %s", config->output_file);
-    }
-    
-    // Cleanup
-    ast_free(ast);
-    free(source);
-    
-    return 0;
-}
-
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        print_usage(argv[0]);
+    // Create interpreter and run
+    LOG(LOG_INFO, "Starting interpretation...");
+    SwiftFlowInterpreter* interpreter = interpreter_new();
+    if (!interpreter) {
+        LOG(LOG_ERROR, "Failed to create interpreter");
+        ast_free(ast);
         return 1;
     }
     
+    interpreter->debug_mode = config->debug;
+    
+    int result = interpreter_run(interpreter, ast);
+    
+    if (interpreter->had_error) {
+        LOG(LOG_ERROR, "Runtime error at %d:%d: %s", 
+            interpreter->error_line, 
+            interpreter->error_column,
+            interpreter->error_message);
+        result = 1;
+    }
+    
+    // Cleanup
+    interpreter_free(interpreter);
+    ast_free(ast);
+    
+    if (result == 0) {
+        LOG(LOG_INFO, "Interpretation completed successfully");
+    }
+    
+    return result;
+}
+
+int main(int argc, char** argv) {
     process_args(argc, argv);
     
-    int result = compile_and_execute();
+    char* source = NULL;
+    char* filename = config->input_file;
     
-    if (config) {
-        config_free(config);
+    if (!filename || strcmp(filename, "-") == 0) {
+        // Read from stdin
+        printf("%sReading from stdin...%s\n", COLOR_YELLOW, COLOR_RESET);
+        printf("%sEnter SwiftFlow code (Ctrl+D to finish):%s\n", COLOR_CYAN, COLOR_RESET);
+        source = read_stdin();
+        filename = "<stdin>";
+    } else {
+        // Read from file
+        source = read_file(filename);
     }
+    
+    if (!source) {
+        LOG(LOG_ERROR, "Failed to read input");
+        config_free(config);
+        return 1;
+    }
+    
+    int result = interpret_swiftflow(source, filename);
+    
+    free(source);
+    config_free(config);
     
     return result;
 }
