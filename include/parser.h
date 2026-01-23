@@ -8,7 +8,6 @@
 void parser_init(Parser* parser, Lexer* lexer);
 ASTNode* parse_program(Parser* parser);
 ASTNode* parse_statement(Parser* parser);
-// RETIRER: ASTNode* parse_expression(Parser* parser);  // <-- ENLEVER CETTE LIGNE
 ASTNode* parse_block(Parser* parser);
 void parser_synchronize(Parser* parser);
 bool parser_match(Parser* parser, TokenKind kind);
@@ -25,9 +24,6 @@ ASTNode* parse_while_statement(Parser* parser);
 ASTNode* parse_for_statement(Parser* parser);
 ASTNode* parse_var_declaration(Parser* parser);
 ASTNode* parse_function_declaration(Parser* parser);
-ASTNode* parse_class_declaration(Parser* parser);
-ASTNode* parse_switch_statement(Parser* parser);
-ASTNode* parse_try_statement(Parser* parser);
 ASTNode* parse_print_statement(Parser* parser);
 ASTNode* parse_input_statement(Parser* parser);
 
