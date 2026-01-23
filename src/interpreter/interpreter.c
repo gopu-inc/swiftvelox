@@ -8,7 +8,11 @@
 // ======================================================
 // [SECTION] VALUE OPERATIONS
 // ======================================================
-
+// SUPPORT JSONSWIFT
+Value json_builtin_parse(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
+Value json_builtin_stringify(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
+Value json_builtin_read_file(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
+Value json_builtin_write_file(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
 Value value_make_int(int64_t val) {
     Value value;
     value.type = VAL_INT;
