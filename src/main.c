@@ -1,6 +1,14 @@
+[file name]: main.c
+[file content begin]
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <sys/stat.h>
 #include "common.h"
 #include "lexer.h"
 #include "parser.h"
@@ -9,6 +17,15 @@
 
 // Global configuration
 SwiftFlowConfig* config = NULL;
+
+// HTTP server structure
+typedef struct {
+    int port;
+    char* host;
+    char* root_dir;
+    bool dev_mode;
+    int socket_fd;
+} HttpServer;
 
 // Logging implementation
 void swiftflow_log(LogLevel level, const char* file, int line, const char* fmt, ...) {
@@ -26,7 +43,6 @@ void swiftflow_log(LogLevel level, const char* file, int line, const char* fmt, 
     };
     
     if (!config) {
-        // Default to showing all if config not initialized
         if (level == LOG_DEBUG || level == LOG_TRACE) return;
     } else {
         if (level == LOG_DEBUG && !config->debug) return;
@@ -101,17 +117,31 @@ void print_usage(const char* program_name) {
     printf("%sSwiftFlow Interpreter v%s%s\n", 
            COLOR_CYAN, SWIFTFLOW_VERSION_STRING, COLOR_RESET);
     printf("==============================================\n\n");
-    printf("Usage: %s <input.swf> [options]\n\n", program_name);
-    printf("Options:\n");
-    printf("  -v, --verbose      Verbose output\n");
-    printf("  -d, --debug        Debug mode\n");
-    printf("  -q, --quiet        Quiet mode (no warnings)\n");
-    printf("  -I <path>          Add import search path\n");
-    printf("  -h, --help         Show this help message\n\n");
-    printf("Examples:\n");
+    printf("Usage: %s [options] <file.swf>|<command>\n\n", program_name);
+    printf("Commands:\n");
+    printf("  run <file>        Run SwiftFlow program\n");
+    printf("  repl              Start interactive REPL\n");
+    printf("  compile <file>    Compile to bytecode\n");
+    printf("\nOptions:\n");
+    printf("  -v, --verbose        Verbose output\n");
+    printf("  -d, --debug          Debug mode\n");
+    printf("  -q, --quiet          Quiet mode (no warnings)\n");
+    printf("  -r, --run <code>     Run code directly\n");
+    printf("  -c, --compile        Compile mode\n");
+    printf("  -s, --server         Start HTTP server\n");
+    printf("  -o, --optimize       Enable optimizations\n");
+    printf("  -I <path>            Add import search path\n");
+    printf("  --port <port>        HTTP server port (default: 8080)\n");
+    printf("  --host <host>        HTTP server host (default: 0.0.0.0)\n");
+    printf("  --dev                Development mode\n");
+    printf("  --stdin              Read from stdin\n");
+    printf("  --help               Show this help\n");
+    printf("\nExamples:\n");
     printf("  %s program.swf\n", program_name);
-    printf("  %s program.swf -d        # Run in debug mode\n", program_name);
-    printf("  %s -                     # Read from stdin\n", program_name);
+    printf("  %s -r \"print('Hello World')\"\n", program_name);
+    printf("  %s -cs program.swf --optimize\n", program_name);
+    printf("  %s run --serv:8080:host:0.0.0.0 --dev\n", program_name);
+    printf("  %s repl\n", program_name);
 }
 
 // Process command line arguments
@@ -126,6 +156,33 @@ void process_args(int argc, char** argv) {
             config->debug = true;
         } else if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--quiet") == 0) {
             config->warnings = false;
+        } else if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--optimize") == 0) {
+            config->optimize = true;
+        } else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--compile") == 0) {
+            config->interpret = false;
+        } else if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--server") == 0) {
+            // Server mode
+            config->input_file = str_copy("server");
+        } else if (strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--run") == 0) {
+            if (i + 1 < argc) {
+                config->input_file = str_copy("-inline-");
+                // Store code in a special way
+                // We'll handle this in main execution
+            }
+        } else if (strcmp(argv[i], "--stdin") == 0) {
+            config->input_file = str_copy("-");
+        } else if (strcmp(argv[i], "--dev") == 0) {
+            config->debug = true;
+            config->verbose = true;
+        } else if (strcmp(argv[i], "--port") == 0) {
+            if (i + 1 < argc) {
+                // Store port for server mode
+                i++;
+            }
+        } else if (strcmp(argv[i], "--host") == 0) {
+            if (i + 1 < argc) {
+                i++;
+            }
         } else if (strcmp(argv[i], "-I") == 0) {
             if (i + 1 < argc) {
                 config_add_import_path(config, argv[++i]);
@@ -133,9 +190,15 @@ void process_args(int argc, char** argv) {
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             exit(EXIT_SUCCESS);
+        } else if (strcmp(argv[i], "repl") == 0) {
+            config->input_file = str_copy("-repl-");
+        } else if (strcmp(argv[i], "run") == 0) {
+            if (i + 1 < argc) {
+                config->input_file = str_copy(argv[++i]);
+            }
         } else if (argv[i][0] != '-') {
             // Input file
-            if (config->input_file) {
+            if (config->input_file && strcmp(config->input_file, "-inline-") != 0) {
                 LOG(LOG_WARNING, "Multiple input files specified, using: %s", config->input_file);
             } else {
                 config->input_file = str_copy(argv[i]);
@@ -143,10 +206,9 @@ void process_args(int argc, char** argv) {
         }
     }
     
-    // If no input file and no stdin indicator, show help
+    // Default to REPL if no input
     if (!config->input_file && argc == 1) {
-        print_usage(argv[0]);
-        exit(EXIT_SUCCESS);
+        config->input_file = str_copy("-repl-");
     }
 }
 
@@ -183,8 +245,133 @@ char* read_stdin() {
     return buffer;
 }
 
+// Simple HTTP server function
+void start_http_server(int port, const char* host, bool dev_mode) {
+    LOG(LOG_INFO, "Starting HTTP server on %s:%d", host, port);
+    
+    int server_fd;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
+    
+    // Create socket
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        LOG(LOG_ERROR, "Socket creation failed");
+        return;
+    }
+    
+    // Set socket options
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        LOG(LOG_ERROR, "Socket options failed");
+        close(server_fd);
+        return;
+    }
+    
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = inet_addr(host);
+    address.sin_port = htons(port);
+    
+    // Bind socket
+    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        LOG(LOG_ERROR, "Bind failed");
+        close(server_fd);
+        return;
+    }
+    
+    // Listen
+    if (listen(server_fd, 10) < 0) {
+        LOG(LOG_ERROR, "Listen failed");
+        close(server_fd);
+        return;
+    }
+    
+    LOG(LOG_INFO, "HTTP server started. Press Ctrl+C to stop.");
+    
+    // Signal handling for graceful shutdown
+    signal(SIGINT, SIG_DFL);
+    
+    // Main server loop
+    while (1) {
+        int client_fd;
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        
+        client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
+        if (client_fd < 0) {
+            LOG(LOG_ERROR, "Accept failed");
+            continue;
+        }
+        
+        // Read request
+        char buffer[4096] = {0};
+        read(client_fd, buffer, 4095);
+        
+        // Parse request
+        char method[16], path[1024];
+        sscanf(buffer, "%s %s", method, path);
+        
+        LOG(LOG_INFO, "Request: %s %s", method, path);
+        
+        // Serve file
+        char file_path[2048];
+        if (strcmp(path, "/") == 0) {
+            strcpy(file_path, "./index.html");
+        } else {
+            snprintf(file_path, sizeof(file_path), ".%s", path);
+        }
+        
+        // Check if file exists
+        FILE* file = fopen(file_path, "rb");
+        if (file) {
+            fseek(file, 0, SEEK_END);
+            long file_size = ftell(file);
+            rewind(file);
+            
+            char* file_content = malloc(file_size + 1);
+            fread(file_content, 1, file_size, file);
+            fclose(file);
+            
+            // Determine content type
+            const char* content_type = "text/plain";
+            if (str_endswith(file_path, ".html")) content_type = "text/html";
+            else if (str_endswith(file_path, ".css")) content_type = "text/css";
+            else if (str_endswith(file_path, ".js")) content_type = "application/javascript";
+            else if (str_endswith(file_path, ".json")) content_type = "application/json";
+            else if (str_endswith(file_path, ".png")) content_type = "image/png";
+            else if (str_endswith(file_path, ".jpg") || str_endswith(file_path, ".jpeg")) 
+                content_type = "image/jpeg";
+            
+            // Send response
+            char header[1024];
+            int header_len = snprintf(header, sizeof(header),
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: %s\r\n"
+                "Content-Length: %ld\r\n"
+                "Connection: close\r\n"
+                "\r\n", content_type, file_size);
+            
+            write(client_fd, header, header_len);
+            write(client_fd, file_content, file_size);
+            
+            free(file_content);
+        } else {
+            // 404 Not Found
+            char* response = "HTTP/1.1 404 Not Found\r\n"
+                            "Content-Type: text/html\r\n"
+                            "Content-Length: 48\r\n"
+                            "\r\n"
+                            "<html><body><h1>404 Not Found</h1></body></html>";
+            write(client_fd, response, strlen(response));
+        }
+        
+        close(client_fd);
+    }
+    
+    close(server_fd);
+}
+
 // Execute SwiftFlow code from source
-int execute_swiftflow(const char* source, const char* filename) {
+int execute_swiftflow(const char* source, const char* filename, bool compile_only) {
     if (!source || !source[0]) {
         LOG(LOG_ERROR, "Empty source code");
         return 1;
@@ -250,6 +437,14 @@ int execute_swiftflow(const char* source, const char* filename) {
         }
     }
     
+    if (compile_only) {
+        // Compilation mode
+        LOG(LOG_INFO, "Compilation complete");
+        ast_free(ast);
+        free(lexer.filename);
+        return 0;
+    }
+    
     // Create interpreter and run
     if (config->verbose) {
         LOG(LOG_INFO, "Starting interpretation...");
@@ -294,6 +489,7 @@ void run_repl() {
     printf("Type 'exit', 'quit', or Ctrl+D to exit\n");
     printf("Type 'help' for available commands\n\n");
     
+    SwiftFlowInterpreter* interpreter = interpreter_new();
     char line[1024];
     int line_num = 1;
     
@@ -324,6 +520,8 @@ void run_repl() {
             printf("  help        - Show this help\n");
             printf("  clear       - Clear screen\n");
             printf("  vars        - Show defined variables\n");
+            printf("  ast <expr>  - Show AST for expression\n");
+            printf("  tokens <code> - Show tokens for code\n");
             continue;
         }
         
@@ -333,12 +531,42 @@ void run_repl() {
         }
         
         if (strcmp(line, "vars") == 0) {
-            printf("Variable display not yet implemented\n");
+            interpreter_dump_environment(interpreter);
+            continue;
+        }
+        
+        if (strncmp(line, "ast ", 4) == 0) {
+            // Parse and show AST
+            const char* code = line + 4;
+            Lexer lexer;
+            lexer_init(&lexer, code, "<repl>");
+            Parser parser;
+            parser_init(&parser, &lexer);
+            ASTNode* ast = parse_program(&parser);
+            if (ast) {
+                ast_print(ast, 0);
+                ast_free(ast);
+            }
+            continue;
+        }
+        
+        if (strncmp(line, "tokens ", 7) == 0) {
+            // Show tokens
+            const char* code = line + 7;
+            Lexer lexer;
+            lexer_init(&lexer, code, "<repl>");
+            Token token;
+            do {
+                token = lexer_next_token(&lexer);
+                printf("Token: %s (%.*s)\n", 
+                       token_kind_to_string(token.kind),
+                       token.length, token.start);
+            } while (token.kind != TK_EOF);
             continue;
         }
         
         // Execute the line
-        int result = execute_swiftflow(line, "<repl>");
+        int result = execute_swiftflow(line, "<repl>", false);
         
         if (result != 0) {
             printf("%sExecution failed%s\n", COLOR_RED, COLOR_RESET);
@@ -347,54 +575,90 @@ void run_repl() {
         line_num++;
     }
     
+    interpreter_free(interpreter);
     printf("\nGoodbye!\n");
 }
 
 int main(int argc, char** argv) {
     process_args(argc, argv);
     
+    // Handle server mode
+    if (config->input_file && strcmp(config->input_file, "server") == 0) {
+        int port = 8080;
+        const char* host = "0.0.0.0";
+        bool dev_mode = config->debug;
+        
+        // Parse additional server arguments
+        for (int i = 1; i < argc; i++) {
+            if (strncmp(argv[i], "--serv:", 7) == 0) {
+                // Format: --serv:8080:host:0.0.0.0
+                char* token = strtok(argv[i] + 7, ":");
+                if (token) port = atoi(token);
+                token = strtok(NULL, ":");
+                if (token && strcmp(token, "host") == 0) {
+                    token = strtok(NULL, ":");
+                    if (token) host = token;
+                }
+            }
+        }
+        
+        start_http_server(port, host, dev_mode);
+        config_free(config);
+        return 0;
+    }
+    
     char* source = NULL;
     char* filename = config->input_file;
     int result = 0;
     
-    if (!filename || strcmp(filename, "-") == 0) {
-        // REPL mode or read from stdin
-        if (isatty(fileno(stdin))) {
-            // Interactive REPL
-            run_repl();
-            config_free(config);
-            return 0;
-        } else {
-            // Read from stdin (piped input)
-            source = read_stdin();
-            filename = "<stdin>";
-            
-            if (!source) {
-                LOG(LOG_ERROR, "Failed to read from stdin");
-                config_free(config);
-                return 1;
+    if (filename && strcmp(filename, "-repl-") == 0) {
+        // REPL mode
+        run_repl();
+        config_free(config);
+        return 0;
+    }
+    
+    if (filename && strcmp(filename, "-inline-") == 0) {
+        // Direct code execution
+        for (int i = 1; i < argc; i++) {
+            if ((strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--run") == 0) && i + 1 < argc) {
+                source = str_copy(argv[i + 1]);
+                filename = "<command-line>";
+                break;
             }
-            
-            result = execute_swiftflow(source, filename);
-            free(source);
         }
-    } else {
+    } else if (filename && strcmp(filename, "-") == 0) {
+        // Read from stdin
+        source = read_stdin();
+        filename = "<stdin>";
+    } else if (filename) {
         // Read from file
         if (filename && !str_endswith(filename, ".swf")) {
             LOG(LOG_WARNING, "File '%s' doesn't have .swf extension", filename);
         }
         
         source = read_file(filename);
-        if (!source) {
-            LOG(LOG_ERROR, "Failed to read file: %s", filename);
-            config_free(config);
-            return 1;
-        }
-        
-        result = execute_swiftflow(source, filename);
-        free(source);
     }
     
+    if (!source) {
+        LOG(LOG_ERROR, "No source code to execute");
+        config_free(config);
+        return 1;
+    }
+    
+    // Check if compile only
+    bool compile_only = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--compile") == 0) {
+            compile_only = true;
+            break;
+        }
+    }
+    
+    result = execute_swiftflow(source, filename, compile_only);
+    
+    free(source);
     config_free(config);
     return result;
 }
+[file content end]
