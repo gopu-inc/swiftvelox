@@ -692,7 +692,11 @@ static inline bool str_endswith(const char* str, const char* suffix) {
 // ======================================================
 // [SECTION] FUNCTION PROTOTYPES
 // ======================================================
-
+// Ajouter dans la section FUNCTION PROTOTYPES:
+bool config_add_import_path(SwiftFlowConfig* config, const char* path);
+char* config_resolve_import(SwiftFlowConfig* config, const char* module_name, const char* from_file);
+Value swiftflow_json_parse(const char* json_str);
+char* swiftflow_json_stringify(Value value);
 // Logging
 void swiftflow_log(LogLevel level, const char* file, int line, const char* fmt, ...);
 
