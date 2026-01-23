@@ -6,7 +6,8 @@
 // ======================================================
 // [SECTION] JSON PARSER
 // ======================================================
-
+// Au début de jsonlib.c, ajoutez :
+extern char* value_to_raw_string(Value value); 
 typedef struct {
     const char* start;
     const char* current;
