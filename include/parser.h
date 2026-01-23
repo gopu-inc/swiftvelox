@@ -1,42 +1,46 @@
-#ifndef PARSER_H
-#define PARSER_H
+#ifndef INTERPRETER_H
+#define INTERPRETER_H
 
 #include "common.h"
-#include "ast.h"
-#include "lexer.h"
 
-typedef struct {
-    Lexer* lexer;
-    Token current;
-    Token previous;
-    bool had_error;
-    bool panic_mode;
-} Parser;
+// Forward declarations
+struct SwiftFlowInterpreter;
+struct Environment;
 
-// Parser functions
-void parser_init(Parser* parser, Lexer* lexer);
-ASTNode* parse_program(Parser* parser);
-ASTNode* parse_statement(Parser* parser);
-ASTNode* parse_expression(Parser* parser);
-ASTNode* parse_block(Parser* parser);
-void parser_synchronize(Parser* parser);
-bool parser_match(Parser* parser, TokenKind kind);
-bool parser_check(Parser* parser, TokenKind kind);
-Token parser_consume(Parser* parser, TokenKind kind, const char* error_message);
-void parser_error(Parser* parser, Token token, const char* message);
-void parser_error_at_current(Parser* parser, const char* message);
+// Value operations
+Value value_make_int(int64_t val);
+Value value_make_float(double val);
+Value value_make_bool(bool val);
+Value value_make_string(const char* val);
+Value value_make_null(void);
+Value value_make_undefined(void);
+Value value_make_nan(void);
+Value value_make_inf(void);
+void value_free(Value* value);
+char* value_to_string(Value value);
+void value_print(Value value);
+bool value_is_truthy(Value value);
+bool value_equal(Value a, Value b);
 
-// Grammar-specific parsing
-ASTNode* parse_import_statement(Parser* parser);
-ASTNode* parse_if_statement(Parser* parser);
-ASTNode* parse_while_statement(Parser* parser);
-ASTNode* parse_for_statement(Parser* parser);
-ASTNode* parse_var_declaration(Parser* parser);
-ASTNode* parse_function_declaration(Parser* parser);
-ASTNode* parse_class_declaration(Parser* parser);
-ASTNode* parse_switch_statement(Parser* parser);
-ASTNode* parse_try_statement(Parser* parser);
-ASTNode* parse_print_statement(Parser* parser);
-ASTNode* parse_input_statement(Parser* parser);
+// Environment operations
+struct Environment* environment_new(struct Environment* parent);
+void environment_free(struct Environment* env);
+void environment_define(struct Environment* env, const char* name, Value value);
+bool environment_set(struct Environment* env, const char* name, Value value);
+Value environment_get(struct Environment* env, const char* name);
+bool environment_exists(struct Environment* env, const char* name);
 
-#endif // PARSER_H
+// Interpreter operations
+struct SwiftFlowInterpreter* interpreter_new(void);
+void interpreter_free(struct SwiftFlowInterpreter* interpreter);
+int interpreter_run(struct SwiftFlowInterpreter* interpreter, ASTNode* ast);
+Value interpreter_evaluate(struct SwiftFlowInterpreter* interpreter, ASTNode* node, struct Environment* env);
+Value interpreter_execute_block(struct SwiftFlowInterpreter* interpreter, ASTNode* block, struct Environment* env);
+void interpreter_error(struct SwiftFlowInterpreter* interpreter, const char* message, int line, int column);
+void interpreter_register_builtins(struct SwiftFlowInterpreter* interpreter);
+
+// Utility functions
+void interpreter_dump_environment(struct SwiftFlowInterpreter* interpreter);
+void interpreter_dump_value(Value value);
+
+#endif // INTERPRETER_H
