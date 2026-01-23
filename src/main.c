@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "include/common.h"
+#include "common.h"
 #include "lexer.h"
 #include "parser.h"
 #include "ast.h"
