@@ -25,11 +25,6 @@ static char json_peek(JsonParser* parser) {
     return *parser->current;
 }
 
-static char json_peek_next(JsonParser* parser) {
-    if (parser->current[0] == '\0') return '\0';
-    return parser->current[1];
-}
-
 static bool json_is_at_end(JsonParser* parser) {
     return *parser->current == '\0';
 }
@@ -53,10 +48,11 @@ static void json_skip_whitespace(JsonParser* parser) {
 static JsonValue* json_parse_value(JsonParser* parser);
 static JsonValue* json_parse_array(JsonParser* parser);
 static JsonValue* json_parse_object(JsonParser* parser);
-static JsonValue* json_parse_string(JsonParser* parser);
+static JsonValue* json_parse_string_literal(JsonParser* parser);  // Renommé
 static JsonValue* json_parse_number(JsonParser* parser);
 static JsonValue* json_parse_literal(JsonParser* parser);
 
+// Fonction publique pour parser une chaîne JSON
 JsonValue* json_parse_string(const char* str) {
     JsonParser parser;
     parser.start = str;
@@ -83,7 +79,7 @@ static JsonValue* json_parse_value(JsonParser* parser) {
     char c = json_peek(parser);
     
     if (c == '"') {
-        return json_parse_string(parser);
+        return json_parse_string_literal(parser);  // Utilise le nouveau nom
     } else if (c == '[') {
         return json_parse_array(parser);
     } else if (c == '{') {
@@ -97,6 +93,8 @@ static JsonValue* json_parse_value(JsonParser* parser) {
 
 static JsonValue* json_parse_array(JsonParser* parser) {
     JsonValue* array = ALLOC(JsonValue);
+    if (!array) return NULL;
+    
     array->type = JSON_ARRAY;
     array->as.array.elements = NULL;
     array->as.array.count = 0;
@@ -125,7 +123,13 @@ static JsonValue* json_parse_array(JsonParser* parser) {
         // Add element to array
         if (array->as.array.count >= array->as.array.capacity) {
             int new_capacity = array->as.array.capacity == 0 ? 4 : array->as.array.capacity * 2;
-            array->as.array.elements = REALLOC(array->as.array.elements, JsonValue*, new_capacity);
+            JsonValue** new_elements = REALLOC(array->as.array.elements, JsonValue*, new_capacity);
+            if (!new_elements) {
+                json_free(element);
+                json_free(array);
+                return NULL;
+            }
+            array->as.array.elements = new_elements;
             array->as.array.capacity = new_capacity;
         }
         
@@ -152,6 +156,8 @@ static JsonValue* json_parse_array(JsonParser* parser) {
 
 static JsonValue* json_parse_object(JsonParser* parser) {
     JsonValue* object = ALLOC(JsonValue);
+    if (!object) return NULL;
+    
     object->type = JSON_OBJECT;
     object->as.object.keys = NULL;
     object->as.object.values = NULL;
@@ -178,7 +184,7 @@ static JsonValue* json_parse_object(JsonParser* parser) {
             return NULL;
         }
         
-        JsonValue* key_json = json_parse_string(parser);
+        JsonValue* key_json = json_parse_string_literal(parser);  // Utilise le nouveau nom
         if (!key_json || key_json->type != JSON_STRING) {
             if (key_json) json_free(key_json);
             json_free(object);
@@ -209,8 +215,21 @@ static JsonValue* json_parse_object(JsonParser* parser) {
         // Add to object
         if (object->as.object.count >= object->as.object.capacity) {
             int new_capacity = object->as.object.capacity == 0 ? 4 : object->as.object.capacity * 2;
-            object->as.object.keys = REALLOC(object->as.object.keys, char*, new_capacity);
-            object->as.object.values = REALLOC(object->as.object.values, JsonValue*, new_capacity);
+            
+            char** new_keys = REALLOC(object->as.object.keys, char*, new_capacity);
+            JsonValue** new_values = REALLOC(object->as.object.values, JsonValue*, new_capacity);
+            
+            if (!new_keys || !new_values) {
+                free(new_keys);
+                free(new_values);
+                free(key);
+                json_free(value);
+                json_free(object);
+                return NULL;
+            }
+            
+            object->as.object.keys = new_keys;
+            object->as.object.values = new_values;
             object->as.object.capacity = new_capacity;
         }
         
@@ -235,7 +254,7 @@ static JsonValue* json_parse_object(JsonParser* parser) {
     return object;
 }
 
-static JsonValue* json_parse_string(JsonParser* parser) {
+static JsonValue* json_parse_string_literal(JsonParser* parser) {  // Renommé
     // Skip opening quote
     json_advance(parser);
     
@@ -260,8 +279,15 @@ static JsonValue* json_parse_string(JsonParser* parser) {
     
     // Create string
     JsonValue* string_val = ALLOC(JsonValue);
+    if (!string_val) return NULL;
+    
     string_val->type = JSON_STRING;
     string_val->as.str_val = str_ncopy(start, length);
+    
+    if (!string_val->as.str_val) {
+        free(string_val);
+        return NULL;
+    }
     
     // TODO: Handle escape sequences properly
     
@@ -307,8 +333,15 @@ static JsonValue* json_parse_number(JsonParser* parser) {
     }
     
     // Parse the number
-    char* num_str = str_ncopy(start, parser->current - start);
+    int length = parser->current - start;
+    char* num_str = str_ncopy(start, length);
+    if (!num_str) return NULL;
+    
     JsonValue* number = ALLOC(JsonValue);
+    if (!number) {
+        free(num_str);
+        return NULL;
+    }
     
     if (is_float) {
         number->type = JSON_FLOAT;
@@ -324,6 +357,7 @@ static JsonValue* json_parse_number(JsonParser* parser) {
 
 static JsonValue* json_parse_literal(JsonParser* parser) {
     JsonValue* literal = ALLOC(JsonValue);
+    if (!literal) return NULL;
     
     if (strncmp(parser->current, "true", 4) == 0) {
         literal->type = JSON_BOOL;
@@ -353,7 +387,9 @@ static void json_append_string(char** buffer, int* size, int* capacity, const ch
     
     while (*size + len >= *capacity) {
         *capacity = *capacity == 0 ? 256 : *capacity * 2;
-        *buffer = REALLOC(*buffer, char, *capacity);
+        char* new_buffer = REALLOC(*buffer, char, *capacity);
+        if (!new_buffer) return;
+        *buffer = new_buffer;
     }
     
     strcpy(*buffer + *size, str);
@@ -377,7 +413,7 @@ static void json_stringify_value(JsonValue* json, char** buffer, int* size, int*
             
         case JSON_INT: {
             char num_str[32];
-            snprintf(num_str, sizeof(num_str), "%ld", json->as.int_val);
+            snprintf(num_str, sizeof(num_str), "%lld", (long long)json->as.int_val);  // Corrigé
             json_append_string(buffer, size, capacity, num_str);
             break;
         }
@@ -443,7 +479,10 @@ char* json_stringify(JsonValue* json) {
     
     if (buffer) {
         buffer[size] = '\0';
-        buffer = REALLOC(buffer, char, size + 1);
+        char* resized = REALLOC(buffer, char, size + 1);
+        if (resized) {
+            buffer = resized;
+        }
     }
     
     return buffer;
@@ -494,6 +533,7 @@ void json_free(JsonValue* json) {
 
 JsonValue* swiftflow_value_to_json(Value value) {
     JsonValue* json = ALLOC(JsonValue);
+    if (!json) return NULL;
     
     switch (value.type) {
         case VAL_NULL:
@@ -518,16 +558,38 @@ JsonValue* swiftflow_value_to_json(Value value) {
         case VAL_STRING:
             json->type = JSON_STRING;
             json->as.str_val = str_copy(value.as.str_val);
+            if (!json->as.str_val) {
+                free(json);
+                return NULL;
+            }
             break;
             
         case VAL_ARRAY: {
             json->type = JSON_ARRAY;
             json->as.array.count = value.as.array.count;
             json->as.array.capacity = value.as.array.capacity;
-            json->as.array.elements = ALLOC_ARRAY(JsonValue*, value.as.array.count);
             
-            for (int i = 0; i < value.as.array.count; i++) {
-                json->as.array.elements[i] = swiftflow_value_to_json(value.as.array.elements[i]);
+            if (value.as.array.count > 0) {
+                json->as.array.elements = ALLOC_ARRAY(JsonValue*, value.as.array.count);
+                if (!json->as.array.elements) {
+                    free(json);
+                    return NULL;
+                }
+                
+                for (int i = 0; i < value.as.array.count; i++) {
+                    json->as.array.elements[i] = swiftflow_value_to_json(value.as.array.elements[i]);
+                    if (!json->as.array.elements[i]) {
+                        // Cleanup on error
+                        for (int j = 0; j < i; j++) {
+                            json_free(json->as.array.elements[j]);
+                        }
+                        free(json->as.array.elements);
+                        free(json);
+                        return NULL;
+                    }
+                }
+            } else {
+                json->as.array.elements = NULL;
             }
             break;
         }
@@ -536,12 +598,37 @@ JsonValue* swiftflow_value_to_json(Value value) {
             json->type = JSON_OBJECT;
             json->as.object.count = value.as.map.count;
             json->as.object.capacity = value.as.map.capacity;
-            json->as.object.keys = ALLOC_ARRAY(char*, value.as.map.count);
-            json->as.object.values = ALLOC_ARRAY(JsonValue*, value.as.map.count);
             
-            for (int i = 0; i < value.as.map.count; i++) {
-                json->as.object.keys[i] = str_copy(value.as.map.keys[i]);
-                json->as.object.values[i] = swiftflow_value_to_json(value.as.map.values[i]);
+            if (value.as.map.count > 0) {
+                json->as.object.keys = ALLOC_ARRAY(char*, value.as.map.count);
+                json->as.object.values = ALLOC_ARRAY(JsonValue*, value.as.map.count);
+                
+                if (!json->as.object.keys || !json->as.object.values) {
+                    free(json->as.object.keys);
+                    free(json->as.object.values);
+                    free(json);
+                    return NULL;
+                }
+                
+                for (int i = 0; i < value.as.map.count; i++) {
+                    json->as.object.keys[i] = str_copy(value.as.map.keys[i]);
+                    json->as.object.values[i] = swiftflow_value_to_json(value.as.map.values[i]);
+                    
+                    if (!json->as.object.keys[i] || !json->as.object.values[i]) {
+                        // Cleanup on error
+                        for (int j = 0; j < i; j++) {
+                            free(json->as.object.keys[j]);
+                            json_free(json->as.object.values[j]);
+                        }
+                        free(json->as.object.keys);
+                        free(json->as.object.values);
+                        free(json);
+                        return NULL;
+                    }
+                }
+            } else {
+                json->as.object.keys = NULL;
+                json->as.object.values = NULL;
             }
             break;
         }
@@ -579,10 +666,18 @@ Value json_to_swiftflow_value(JsonValue* json) {
             array_val.type = VAL_ARRAY;
             array_val.as.array.count = json->as.array.count;
             array_val.as.array.capacity = json->as.array.capacity;
-            array_val.as.array.elements = ALLOC_ARRAY(Value, json->as.array.count);
             
-            for (int i = 0; i < json->as.array.count; i++) {
-                array_val.as.array.elements[i] = json_to_swiftflow_value(json->as.array.elements[i]);
+            if (json->as.array.count > 0) {
+                array_val.as.array.elements = ALLOC_ARRAY(Value, json->as.array.count);
+                if (!array_val.as.array.elements) {
+                    return value_make_null();
+                }
+                
+                for (int i = 0; i < json->as.array.count; i++) {
+                    array_val.as.array.elements[i] = json_to_swiftflow_value(json->as.array.elements[i]);
+                }
+            } else {
+                array_val.as.array.elements = NULL;
             }
             return array_val;
         }
@@ -592,12 +687,35 @@ Value json_to_swiftflow_value(JsonValue* json) {
             map_val.type = VAL_MAP;
             map_val.as.map.count = json->as.object.count;
             map_val.as.map.capacity = json->as.object.capacity;
-            map_val.as.map.keys = ALLOC_ARRAY(char*, json->as.object.count);
-            map_val.as.map.values = ALLOC_ARRAY(Value, json->as.object.count);
             
-            for (int i = 0; i < json->as.object.count; i++) {
-                map_val.as.map.keys[i] = str_copy(json->as.object.keys[i]);
-                map_val.as.map.values[i] = json_to_swiftflow_value(json->as.object.values[i]);
+            if (json->as.object.count > 0) {
+                map_val.as.map.keys = ALLOC_ARRAY(char*, json->as.object.count);
+                map_val.as.map.values = ALLOC_ARRAY(Value, json->as.object.count);
+                
+                if (!map_val.as.map.keys || !map_val.as.map.values) {
+                    free(map_val.as.map.keys);
+                    free(map_val.as.map.values);
+                    return value_make_null();
+                }
+                
+                for (int i = 0; i < json->as.object.count; i++) {
+                    map_val.as.map.keys[i] = str_copy(json->as.object.keys[i]);
+                    map_val.as.map.values[i] = json_to_swiftflow_value(json->as.object.values[i]);
+                    
+                    if (!map_val.as.map.keys[i]) {
+                        // Cleanup on error
+                        for (int j = 0; j < i; j++) {
+                            free(map_val.as.map.keys[j]);
+                            value_free(&map_val.as.map.values[j]);
+                        }
+                        free(map_val.as.map.keys);
+                        free(map_val.as.map.values);
+                        return value_make_null();
+                    }
+                }
+            } else {
+                map_val.as.map.keys = NULL;
+                map_val.as.map.values = NULL;
             }
             return map_val;
         }
@@ -627,6 +745,8 @@ Value swiftflow_json_parse(const char* json_str) {
 
 char* swiftflow_json_stringify(Value value) {
     JsonValue* json = swiftflow_value_to_json(value);
+    if (!json) return NULL;
+    
     char* result = json_stringify(json);
     json_free(json);
     return result;
@@ -677,6 +797,8 @@ bool swiftflow_json_write_file(const char* filename, Value value) {
     if (!filename) return false;
     
     JsonValue* json = swiftflow_value_to_json(value);
+    if (!json) return false;
+    
     char* json_str = json_stringify(json);
     json_free(json);
     
@@ -698,6 +820,9 @@ bool swiftflow_json_write_file(const char* filename, Value value) {
 // [SECTION] BUILT-IN FUNCTIONS FOR SWIFTFLOW
 // ======================================================
 
+// Déclaration de value_to_raw_string depuis interpreter.c
+extern char* value_to_raw_string(Value value);
+
 static Value json_builtin_parse(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
     if (arg_count != 1) {
         interpreter_error(interpreter, "json.parse() expects 1 argument", 0, 0);
@@ -705,6 +830,11 @@ static Value json_builtin_parse(SwiftFlowInterpreter* interpreter, Value* args, 
     }
     
     char* json_str = value_to_raw_string(args[0]);
+    if (!json_str) {
+        interpreter_error(interpreter, "Failed to convert to string", 0, 0);
+        return value_make_undefined();
+    }
+    
     Value result = swiftflow_json_parse(json_str);
     free(json_str);
     
@@ -718,6 +848,10 @@ static Value json_builtin_stringify(SwiftFlowInterpreter* interpreter, Value* ar
     }
     
     char* json_str = swiftflow_json_stringify(args[0]);
+    if (!json_str) {
+        return value_make_string("{}");
+    }
+    
     Value result = value_make_string(json_str);
     free(json_str);
     
@@ -758,21 +892,8 @@ static Value json_builtin_write_file(SwiftFlowInterpreter* interpreter, Value* a
 // ======================================================
 
 void jsonlib_register(SwiftFlowInterpreter* interpreter) {
-    // Create JSON module object
-    Value json_module;
-    json_module.type = VAL_OBJECT; // Or create a new type VAL_MODULE
-    
     // Register JSON functions in the interpreter
-    // We'll add them directly to the global environment for now
-    environment_define(interpreter->global_env, "json_parse", 
-        value_make_string("__json_parse__")); // Placeholder
-    
-    environment_define(interpreter->global_env, "json_stringify", 
-        value_make_string("__json_stringify__")); // Placeholder
-    
-    environment_define(interpreter->global_env, "json_read_file", 
-        value_make_string("__json_read_file__")); // Placeholder
-    
-    environment_define(interpreter->global_env, "json_write_file", 
-        value_make_string("__json_write_file__")); // Placeholder
+    // Note: We need to modify interpreter.c to actually register these functions
+    // For now, we'll just declare the functions
+    (void)interpreter; // Mark as used to avoid warning
 }
