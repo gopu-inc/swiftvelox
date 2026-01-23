@@ -1,4 +1,36 @@
 #include "common.h"
+#include <math.h>
+
+// Portable dirname implementation
+static char* portable_dirname(const char* path) {
+    if (!path) return str_copy(".");
+    
+    char* copy = str_copy(path);
+    char* last_slash = strrchr(copy, '/');
+    
+    if (last_slash) {
+        if (last_slash == copy) {
+            // Root directory
+            last_slash[1] = '\0';
+        } else {
+            // Remove last component
+            *last_slash = '\0';
+        }
+    } else {
+        // No slash, current directory
+        free(copy);
+        return str_copy(".");
+    }
+    
+    return copy;
+}
+
+// Helper function pour str_startswith
+static bool str_startswith(const char* str, const char* prefix) {
+    if (!str || !prefix) return false;
+    size_t prefix_len = strlen(prefix);
+    return strncmp(str, prefix, prefix_len) == 0;
+}
 
 // Basic runtime functions
 
@@ -11,24 +43,15 @@ SwiftFlowConfig* config_create_default(void) {
     config->debug = false;
     config->warnings = true;
     config->optimize = true;
-    config->emit_llvm = false;
-    config->emit_asm = false;
-    config->link = true;
     config->interpret = false;
     
     config->input_file = NULL;
-    config->output_file = str_copy("a.out");
-    config->output_format = str_copy("exe");
     
     config->import_paths = NULL;
     config->import_path_count = 0;
     
-    config->gc_enabled = true;
     config->stack_size = 1024 * 1024; // 1MB
     config->heap_size = 16 * 1024 * 1024; // 16MB
-    
-    config->optimization_level = 1;
-    config->target_arch = str_copy("x64");
     
     return config;
 }
@@ -38,9 +61,6 @@ void config_free(SwiftFlowConfig* config) {
     if (!config) return;
     
     FREE(config->input_file);
-    FREE(config->output_file);
-    FREE(config->output_format);
-    FREE(config->target_arch);
     
     if (config->import_paths) {
         for (int i = 0; i < config->import_path_count; i++) {
@@ -86,11 +106,10 @@ char* config_resolve_import(SwiftFlowConfig* config, const char* module_name, co
     
     // Check relative to current file
     if (from_file) {
-        char* dir = str_copy(from_file);
-        char* dirname_part = dirname(dir);
+        char* dir = portable_dirname(from_file);
         
         // Try ./module.swf
-        resolved = str_format("%s/%s.swf", dirname_part, module_name);
+        resolved = str_format("%s/%s.swf", dir, module_name);
         if (access(resolved, R_OK) == 0) {
             free(dir);
             return resolved;
@@ -98,7 +117,7 @@ char* config_resolve_import(SwiftFlowConfig* config, const char* module_name, co
         FREE(resolved);
         
         // Try ./module/module.swf
-        resolved = str_format("%s/%s/%s.swf", dirname_part, module_name, module_name);
+        resolved = str_format("%s/%s/%s.swf", dir, module_name, module_name);
         if (access(resolved, R_OK) == 0) {
             free(dir);
             return resolved;
@@ -178,6 +197,20 @@ Value value_make_undefined(void) {
     return value;
 }
 
+Value value_make_nan(void) {
+    Value value;
+    value.type = VAL_NAN;
+    value.as.float_val = NAN;
+    return value;
+}
+
+Value value_make_inf(void) {
+    Value value;
+    value.type = VAL_INF;
+    value.as.float_val = INFINITY;
+    return value;
+}
+
 void value_free(Value* value) {
     if (!value) return;
     
@@ -213,6 +246,12 @@ char* value_to_string(Value value) {
         case VAL_INT:
             return str_format("%ld", value.as.int_val);
         case VAL_FLOAT:
+            if (isnan(value.as.float_val)) {
+                return str_copy("nan");
+            }
+            if (isinf(value.as.float_val)) {
+                return str_copy(value.as.float_val > 0 ? "inf" : "-inf");
+            }
             return str_format("%g", value.as.float_val);
         case VAL_BOOL:
             return str_copy(value.as.bool_val ? "true" : "false");
@@ -222,6 +261,10 @@ char* value_to_string(Value value) {
             return str_copy("null");
         case VAL_UNDEFINED:
             return str_copy("undefined");
+        case VAL_NAN:
+            return str_copy("nan");
+        case VAL_INF:
+            return str_copy("inf");
         default:
             return str_format("<value type %d>", value.type);
     }
