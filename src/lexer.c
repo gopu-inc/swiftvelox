@@ -1,7 +1,13 @@
+[file name]: lexer.c
+[file content begin]
 #include "lexer.h"
 #include "common.h"
 #include <ctype.h>
 #include <math.h>
+
+// Global error tracking
+static bool lexer_had_error = false;
+static char lexer_error_message[256] = {0};
 
 void lexer_init(Lexer* lexer, const char* source, const char* filename) {
     lexer->source = source;
@@ -11,6 +17,8 @@ void lexer_init(Lexer* lexer, const char* source, const char* filename) {
     lexer->column = 1;
     lexer->filename = str_copy(filename);
     memset(&lexer->current_token, 0, sizeof(Token));
+    lexer_had_error = false;
+    lexer_error_message[0] = '\0';
 }
 
 bool lexer_is_at_end(Lexer* lexer) {
@@ -80,6 +88,13 @@ void lexer_skip_whitespace(Lexer* lexer) {
                         }
                         lexer_advance(lexer);
                     }
+                    
+                    // Check for unterminated comment
+                    if (lexer_is_at_end(lexer)) {
+                        snprintf(lexer_error_message, sizeof(lexer_error_message),
+                                "Unterminated block comment");
+                        lexer_had_error = true;
+                    }
                 } else {
                     return;
                 }
@@ -107,6 +122,10 @@ Token lexer_error_token(Lexer* lexer, const char* message) {
     token.length = (int)strlen(message);
     token.line = lexer->line;
     token.column = lexer->column;
+    
+    snprintf(lexer_error_message, sizeof(lexer_error_message), "%s", message);
+    lexer_had_error = true;
+    
     return token;
 }
 
@@ -115,6 +134,16 @@ Token lexer_string(Lexer* lexer) {
         if (lexer_peek(lexer) == '\n') {
             lexer->line++;
             lexer->column = 1;
+        }
+        
+        // Handle escape sequences
+        if (lexer_peek(lexer) == '\\') {
+            lexer_advance(lexer); // Skip backslash
+            char next = lexer_peek(lexer);
+            if (next != '"' && next != '\\' && next != 'n' && 
+                next != 't' && next != 'r' && next != '0') {
+                return lexer_error_token(lexer, "Invalid escape sequence");
+            }
         }
         lexer_advance(lexer);
     }
@@ -146,6 +175,7 @@ Token lexer_string(Lexer* lexer) {
                     case 'r': *dest++ = '\r'; break;
                     case '\\': *dest++ = '\\'; break;
                     case '"': *dest++ = '"'; break;
+                    case '0': *dest++ = '\0'; break;
                     default: *dest++ = '\\'; *dest++ = *src; break;
                 }
                 src++;
@@ -162,6 +192,7 @@ Token lexer_string(Lexer* lexer) {
 
 Token lexer_number(Lexer* lexer) {
     bool is_float = false;
+    bool has_exponent = false;
     
     // Integer part
     while (isdigit(lexer_peek(lexer))) {
@@ -181,10 +212,15 @@ Token lexer_number(Lexer* lexer) {
     // Exponent part
     if (lexer_peek(lexer) == 'e' || lexer_peek(lexer) == 'E') {
         is_float = true;
+        has_exponent = true;
         lexer_advance(lexer); // Consume e/E
         
         if (lexer_peek(lexer) == '+' || lexer_peek(lexer) == '-') {
             lexer_advance(lexer);
+        }
+        
+        if (!isdigit(lexer_peek(lexer))) {
+            return lexer_error_token(lexer, "Invalid number format: exponent requires digits");
         }
         
         while (isdigit(lexer_peek(lexer))) {
@@ -197,10 +233,22 @@ Token lexer_number(Lexer* lexer) {
     // Parse the value
     char* num_str = str_ncopy(token.start, token.length);
     if (num_str) {
+        char* endptr;
         if (is_float) {
-            token.value.float_val = atof(num_str);
+            token.value.float_val = strtod(num_str, &endptr);
+            if (*endptr != '\0' && !has_exponent) {
+                // Might be a method call like 2.toString()
+                // Roll back and return as integer
+                free(num_str);
+                lexer->current = lexer->start + (endptr - num_str);
+                return lexer_make_token(lexer, TK_INT);
+            }
         } else {
-            token.value.int_val = strtoll(num_str, NULL, 10);
+            token.value.int_val = strtoll(num_str, &endptr, 10);
+            if (*endptr != '\0') {
+                free(num_str);
+                return lexer_error_token(lexer, "Invalid integer format");
+            }
         }
         free(num_str);
     }
@@ -209,7 +257,7 @@ Token lexer_number(Lexer* lexer) {
 }
 
 bool lexer_is_identifier_char(char c) {
-    return isalnum(c) || c == '_' || c == '$' || c == '@';
+    return isalnum(c) || c == '_' || c == '$' || c == '@' || c == '?';
 }
 
 Token lexer_identifier(Lexer* lexer) {
@@ -224,6 +272,22 @@ Token lexer_identifier(Lexer* lexer) {
         if (token.length == keywords[i].length &&
             memcmp(token.start, keywords[i].keyword, token.length) == 0) {
             token.kind = keywords[i].kind;
+            
+            // Set literal values for true/false/null
+            if (token.kind == TK_TRUE) {
+                token.value.bool_val = true;
+            } else if (token.kind == TK_FALSE) {
+                token.value.bool_val = false;
+            } else if (token.kind == TK_NULL) {
+                // null is represented as special token
+            } else if (token.kind == TK_UNDEFINED) {
+                // undefined is special token
+            } else if (token.kind == TK_NAN) {
+                token.value.float_val = NAN;
+            } else if (token.kind == TK_INF) {
+                token.value.float_val = INFINITY;
+            }
+            
             break;
         }
     }
@@ -232,6 +296,11 @@ Token lexer_identifier(Lexer* lexer) {
 }
 
 Token lexer_next_token(Lexer* lexer) {
+    if (lexer_had_error) {
+        lexer_had_error = false;
+        return lexer_error_token(lexer, lexer_error_message);
+    }
+    
     lexer_skip_whitespace(lexer);
     
     lexer->start = lexer->current;
@@ -409,12 +478,17 @@ Token lexer_next_token(Lexer* lexer) {
                     case 'r': c = '\r'; break;
                     case '\\': c = '\\'; break;
                     case '\'': c = '\''; break;
-                    default: c = lexer_peek(lexer); break;
+                    case '0': c = '\0'; break;
+                    default: 
+                        c = lexer_peek(lexer); 
+                        lexer_advance(lexer);
+                        return lexer_error_token(lexer, "Invalid escape sequence in character literal");
                 }
                 lexer_advance(lexer);
             } else {
                 c = lexer_advance(lexer);
             }
+            
             if (lexer_peek(lexer) != '\'') {
                 return lexer_error_token(lexer, "Unterminated character literal");
             }
@@ -427,14 +501,15 @@ Token lexer_next_token(Lexer* lexer) {
         case '$': return lexer_make_token(lexer, TK_DOLLAR);
         case '`': return lexer_make_token(lexer, TK_BACKTICK);
         case '\\':
-            // Could be line continuation or lambda
+            // Line continuation
             if (lexer_peek(lexer) == '\n') {
                 lexer_advance(lexer); // Skip newline
                 lexer->line++;
                 lexer->column = 1;
                 return lexer_next_token(lexer); // Skip to next token
             }
-            break;
+            // Lambda or other use
+            return lexer_make_token(lexer, TK_LAMBDA);
     }
     
     return lexer_error_token(lexer, "Unexpected character");
@@ -446,3 +521,12 @@ Token lexer_peek_token(Lexer* lexer) {
     *lexer = saved;
     return token;
 }
+
+bool lexer_had_any_error(void) {
+    return lexer_had_error;
+}
+
+const char* lexer_get_error(void) {
+    return lexer_error_message;
+}
+[file content end]
