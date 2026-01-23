@@ -1,7 +1,7 @@
-#include <src/frontend/stdio.h>
-#include <src/frontend/stdlib.h>
-#include <src/frontend/string.h>
-#include "src/frontend/common.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "include/common.h"
 #include "src/frontend/lexer.h"
 #include "src/frontend/parser.h"
 #include "src/frontend/ast.h"
