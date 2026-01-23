@@ -3,7 +3,21 @@
 # Compiler and flags
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c99 -g -I./include
-LDFLAGS = -lm  # Ajouter -lbsd pour dirname
+LDFLAGS = -lm  # Ajouter -lbsd pour dirname si nécessaire
+
+# Détection du système d'exploitation
+ifeq ($(OS),Windows_NT)
+    CFLAGS += -D_WIN32
+else
+    UNAME_S := $(shell uname -s)
+    ifeq ($(UNAME_S),Linux)
+        CFLAGS += -D_POSIX_C_SOURCE=199309L
+        LDLIBS += -lrt
+    endif
+    ifeq ($(UNAME_S),Darwin)
+        CFLAGS += -D_DARWIN_C_SOURCE
+    endif
+endif
 
 # Directories
 SRC_DIR = src
@@ -17,26 +31,21 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/frontend/parser.c \
        $(SRC_DIR)/frontend/ast.c \
        $(SRC_DIR)/runtime/swf.c \
+       $(SRC_DIR)/runtime/jsonlib.c \
        $(SRC_DIR)/interpreter/interpreter.c
 
 # Object files
-OBJS = $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
+OBJS = $(OBJ_DIR)/main.o \
+       $(OBJ_DIR)/frontend/lexer.o \
+       $(OBJ_DIR)/frontend/parser.o \
+       $(OBJ_DIR)/frontend/ast.o \
+       $(OBJ_DIR)/runtime/swf.o \
+       $(OBJ_DIR)/runtime/jsonlib.o \
+       $(OBJ_DIR)/interpreter/interpreter.o
 
 # Binary
-TARGET = $(BIN_DIR)/swiftflow
-# Dans votre Makefile, ajoutez :
-ifeq ($(OS),Windows_NT)
-    CFLAGS += -D_WIN32
-else
-    UNAME_S := $(shell uname -s)
-    ifeq ($(UNAME_S),Linux)
-        CFLAGS += -D_POSIX_C_SOURCE=199309L
-        LDLIBS += -lrt
-    endif
-    ifeq ($(UNAME_S),Darwin)
-        CFLAGS += -D_DARWIN_C_SOURCE
-    endif
-endif
+TARGET = $(BIN_DIR)/swift
+
 # Default target
 all: directories $(TARGET)
 
@@ -49,10 +58,23 @@ directories:
 
 # Link executable
 $(TARGET): $(OBJS)
-	$(CC) $(OBJS) -o $@ $(LDFLAGS)
+	$(CC) $(OBJS) -o $@ $(LDFLAGS) $(LDLIBS)
 
-# Compile source files
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+# Règle spécifique pour jsonlib.o
+obj/runtime/jsonlib.o: src/runtime/jsonlib.c include/jsonlib.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Règles génériques pour les fichiers objets
+$(OBJ_DIR)/main.o: $(SRC_DIR)/main.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/frontend/%.o: $(SRC_DIR)/frontend/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/runtime/%.o: $(SRC_DIR)/runtime/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/interpreter/%.o: $(SRC_DIR)/interpreter/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Clean
@@ -62,7 +84,7 @@ clean:
 # Test
 test: all
 	@echo "Testing..."
-	@./$(BIN_DIR)/swiftflow
+	@./$(BIN_DIR)/swift
 
 # Install
 install: all
