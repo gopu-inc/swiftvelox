@@ -9,10 +9,17 @@
 // [SECTION] VALUE OPERATIONS
 // ======================================================
 // SUPPORT JSONSWIFT
-Value json_builtin_parse(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
-Value json_builtin_stringify(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
-Value json_builtin_read_file(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
-Value json_builtin_write_file(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
+// Au début de interpreter.c, après les includes :
+// Déclarations externes pour les fonctions JSON
+extern Value json_builtin_parse(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
+extern Value json_builtin_stringify(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
+extern Value json_builtin_read_file(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
+extern Value json_builtin_write_file(SwiftFlowInterpreter* interpreter, Value* args, int arg_count);
+
+
+// value option
+
+
 Value value_make_int(int64_t val) {
     Value value;
     value.type = VAL_INT;
