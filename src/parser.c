@@ -470,30 +470,44 @@ ASTNode* parse_import_statement(Parser* parser) {
     int line = parser->previous.line;
     int column = parser->previous.column;
     
-    Token module_token = parser_consume(parser, TK_STRING, "Expected module name string");
+    // SwiftFlow syntax: import[module] from [source]
+    parser_consume(parser, TK_LSQUARE, "Expected '[' after 'import'");
+    
+    // Parse module name (must be a string)
+    Token module_token = parser_consume(parser, TK_STRING, "Expected module name string inside brackets");
     if (module_token.kind == TK_ERROR) return NULL;
     
     char* module_name = str_ncopy(module_token.start + 1, module_token.length - 2);
     
+    parser_consume(parser, TK_RSQUARE, "Expected ']' after module name");
+    
+    // Optional 'from' clause
+    char* from_module = NULL;
     if (parser_match(parser, TK_FROM)) {
-        Token from_token = parser_consume(parser, TK_STRING, "Expected source string after 'from'");
+        parser_consume(parser, TK_LSQUARE, "Expected '[' after 'from'");
+        
+        Token from_token = parser_consume(parser, TK_STRING, "Expected source string inside brackets");
         if (from_token.kind == TK_ERROR) {
             free(module_name);
             return NULL;
         }
         
-        char* from_name = str_ncopy(from_token.start + 1, from_token.length - 2);
-        char** modules = malloc(sizeof(char*));
-        modules[0] = module_name;
-        
-        ASTNode* import_node = ast_new_import(modules, 1, from_name, line, column);
-        free(from_name);
-        return import_node;
-    } else {
-        char** modules = malloc(sizeof(char*));
-        modules[0] = module_name;
-        return ast_new_import(modules, 1, NULL, line, column);
+        from_module = str_ncopy(from_token.start + 1, from_token.length - 2);
+        parser_consume(parser, TK_RSQUARE, "Expected ']' after source");
     }
+    
+    // Create import node
+    char** modules = malloc(sizeof(char*));
+    if (!modules) {
+        free(module_name);
+        free(from_module);
+        return NULL;
+    }
+    
+    modules[0] = module_name;
+    ASTNode* import_node = ast_new_import(modules, 1, from_module, line, column);
+    free(from_module);
+    return import_node;
 }
 
 ASTNode* parse_var_declaration(Parser* parser) {
