@@ -1,7 +1,26 @@
-#include "backend.h"
 #include "common.h"
 #include <stdio.h>
 #include <string.h>
+
+// ======================================================
+// [SECTION] FONCTIONS AUXILIAIRES
+// ======================================================
+
+// Generate unique label
+static char* llvm_generate_label(BackendContext* context, const char* prefix) {
+    char* label = str_format("%s%d", prefix, context->label_counter++);
+    return label;
+}
+
+// Generate unique temporary variable
+static char* llvm_generate_temp(BackendContext* context) {
+    char* temp = str_format("%%t%d", context->temp_counter++);
+    return temp;
+}
+
+// ======================================================
+// [SECTION] FONCTIONS DE BASE
+// ======================================================
 
 // Create LLVM backend context
 BackendContext* backend_create(BackendTarget target, const char* filename) {
@@ -45,18 +64,6 @@ void backend_free(BackendContext* context) {
     FREE(context);
 }
 
-// Generate unique label
-char* llvm_generate_label(BackendContext* context, const char* prefix) {
-    char* label = str_format("%s%d", prefix, context->label_counter++);
-    return label;
-}
-
-// Generate unique temporary variable
-char* llvm_generate_temp(BackendContext* context) {
-    char* temp = str_format("%%t%d", context->temp_counter++);
-    return temp;
-}
-
 // Emit LLVM prologue
 void llvm_emit_prologue(BackendContext* context) {
     if (!context->output_file) return;
@@ -92,36 +99,46 @@ void llvm_emit_epilogue(BackendContext* context) {
     fprintf(context->output_file, "}\n");
 }
 
+// ======================================================
+// [SECTION] ÉMISSION DE VALEURS
+// ======================================================
+
 // Emit integer constant
-void llvm_emit_int(BackendContext* context, int64_t value) {
+static void llvm_emit_int_constant(BackendContext* context, int64_t value) {
     char* temp = llvm_generate_temp(context);
-    fprintf(context->output_file, "  %s = add i64 0, %ld\n", temp, value);
+    fprintf(context->output_file, "  %s = add i64 0, %lld\n", temp, value);
+    free(temp);
 }
 
 // Emit float constant
-void llvm_emit_float(BackendContext* context, double value) {
+static void llvm_emit_float_constant(BackendContext* context, double value) {
     char* temp = llvm_generate_temp(context);
     fprintf(context->output_file, "  %s = fadd double 0.0, %f\n", temp, value);
+    free(temp);
 }
 
 // Emit string constant
-void llvm_emit_string(BackendContext* context, const char* value) {
+static void llvm_emit_string_constant(BackendContext* context, const char* value) {
     // Create string constant
     char* str_const = llvm_generate_label(context, "@.str");
-    fprintf(context->output_file, "%s = private constant [%lu x i8] c\"%s\\00\"\n", 
+    fprintf(context->output_file, "%s = private constant [%zu x i8] c\"%s\\00\"\n", 
             str_const, strlen(value) + 1, value);
     
     // Get pointer to string
     char* temp = llvm_generate_temp(context);
-    fprintf(context->output_file, "  %s = getelementptr [%lu x i8], [%lu x i8]* %s, i64 0, i64 0\n",
+    fprintf(context->output_file, "  %s = getelementptr [%zu x i8], [%zu x i8]* %s, i64 0, i64 0\n",
             temp, strlen(value) + 1, strlen(value) + 1, str_const);
     
     free(str_const);
     free(temp);
 }
 
+// ======================================================
+// [SECTION] ÉMISSION D'INSTRUCTIONS
+// ======================================================
+
 // Emit print statement
-void llvm_emit_print(BackendContext* context, ASTNode* node) {
+static void llvm_emit_print(BackendContext* context, ASTNode* node) {
     if (!node->left) return;
     
     ASTNode* value = node->left;
@@ -129,7 +146,7 @@ void llvm_emit_print(BackendContext* context, ASTNode* node) {
     switch (value->type) {
         case NODE_INT:
             // Load integer value
-            fprintf(context->output_file, "  %%print_val = add i64 0, %ld\n", value->data.int_val);
+            fprintf(context->output_file, "  %%print_val = add i64 0, %lld\n", value->data.int_val);
             fprintf(context->output_file, "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.int_fmt, i64 0, i64 0), i64 %%print_val)\n");
             break;
             
@@ -141,7 +158,7 @@ void llvm_emit_print(BackendContext* context, ASTNode* node) {
             
         case NODE_STRING:
             // Create string constant
-            llvm_emit_string(context, value->data.str_val);
+            llvm_emit_string_constant(context, value->data.str_val);
             fprintf(context->output_file, "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.str_fmt, i64 0, i64 0), i8* %%t%d)\n", 
                     context->temp_counter - 1);
             break;
@@ -163,7 +180,7 @@ void llvm_emit_print(BackendContext* context, ASTNode* node) {
 }
 
 // Emit variable declaration
-void llvm_emit_var_decl(BackendContext* context, ASTNode* node) {
+static void llvm_emit_var_decl(BackendContext* context, ASTNode* node) {
     // Allocate space for variable
     char* var_name = node->data.name;
     fprintf(context->output_file, "  %%var_%s = alloca i64\n", var_name);
@@ -173,7 +190,7 @@ void llvm_emit_var_decl(BackendContext* context, ASTNode* node) {
         ASTNode* init_value = node->left;
         
         if (init_value->type == NODE_INT) {
-            fprintf(context->output_file, "  store i64 %ld, i64* %%var_%s\n", 
+            fprintf(context->output_file, "  store i64 %lld, i64* %%var_%s\n", 
                     init_value->data.int_val, var_name);
         } else {
             LOG(LOG_WARNING, "Unsupported initializer type for variable: %s", 
@@ -183,7 +200,7 @@ void llvm_emit_var_decl(BackendContext* context, ASTNode* node) {
 }
 
 // Emit binary operation
-void llvm_emit_binary(BackendContext* context, ASTNode* node) {
+static void llvm_emit_binary(BackendContext* context, ASTNode* node) {
     // TODO: Implement binary operation code generation
     // This is a simplified version
     
@@ -194,12 +211,16 @@ void llvm_emit_binary(BackendContext* context, ASTNode* node) {
         node->left && node->left->type == NODE_INT &&
         node->right && node->right->type == NODE_INT) {
         
-        fprintf(context->output_file, "  %s = add i64 %ld, %ld\n",
+        fprintf(context->output_file, "  %s = add i64 %lld, %lld\n",
                 temp_result, node->left->data.int_val, node->right->data.int_val);
     }
     
     free(temp_result);
 }
+
+// ======================================================
+// [SECTION] ÉMISSION DE NŒUDS AST
+// ======================================================
 
 // Emit AST node recursively
 void llvm_emit_node(BackendContext* context, ASTNode* node) {
@@ -224,7 +245,7 @@ void llvm_emit_node(BackendContext* context, ASTNode* node) {
             llvm_emit_binary(context, node);
             break;
             
-        case NODE_BLOCK:
+        case NODE_BLOCK: {
             // Emit all statements in block
             ASTNode* stmt = node->left;
             while (stmt) {
@@ -232,8 +253,9 @@ void llvm_emit_node(BackendContext* context, ASTNode* node) {
                 stmt = stmt->right;
             }
             break;
+        }
             
-        case NODE_PROGRAM:
+        case NODE_PROGRAM: {
             // Emit all top-level statements
             ASTNode* top_stmt = node->left;
             while (top_stmt) {
@@ -241,6 +263,7 @@ void llvm_emit_node(BackendContext* context, ASTNode* node) {
                 top_stmt = top_stmt->right;
             }
             break;
+        }
             
         default:
             LOG(LOG_WARNING, "Unsupported node type for LLVM backend: %s", 
@@ -249,8 +272,12 @@ void llvm_emit_node(BackendContext* context, ASTNode* node) {
     }
 }
 
+// ======================================================
+// [SECTION] COMPILATION PRINCIPALE
+// ======================================================
+
 // Compile AST to LLVM IR
-void llvm_compile(BackendContext* context, ASTNode* ast) {
+void backend_compile(BackendContext* context, ASTNode* ast) {
     LOG(LOG_INFO, "Generating LLVM IR...");
     
     llvm_emit_prologue(context);
