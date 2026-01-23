@@ -1,5 +1,7 @@
+/*
 [file name]: main.c
 [file content begin]
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -661,4 +663,6 @@ int main(int argc, char** argv) {
     config_free(config);
     return result;
 }
-[file content end]
+/*
+    [file content end]
+*/
