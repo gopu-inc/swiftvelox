@@ -2,12 +2,40 @@
 #include "interpreter.h"
 #include <stdio.h>
 #include <ctype.h>
+#include <string.h>
+
+// ======================================================
+// [SECTION] FONCTIONS AUXILIAIRES
+// ======================================================
+
+static char* json_value_to_string(Value value) {
+    switch (value.type) {
+        case VAL_STRING:
+            return str_copy(value.as.str_val);
+        case VAL_INT:
+            return str_format("%ld", value.as.int_val);
+        case VAL_FLOAT: {
+            return str_format("%g", value.as.float_val);
+        }
+        case VAL_BOOL:
+            return str_copy(value.as.bool_val ? "true" : "false");
+        case VAL_NULL:
+            return str_copy("null");
+        case VAL_UNDEFINED:
+            return str_copy("undefined");
+        case VAL_ARRAY:
+            return str_format("[array:%d]", value.as.array.count);
+        case VAL_MAP:
+            return str_format("{map:%d}", value.as.map.count);
+        default:
+            return str_copy("");
+    }
+}
 
 // ======================================================
 // [SECTION] JSON PARSER
 // ======================================================
-// Au début de jsonlib.c, ajoutez :
-extern char* value_to_raw_string(Value value); 
+
 typedef struct {
     const char* start;
     const char* current;
@@ -49,12 +77,14 @@ static void json_skip_whitespace(JsonParser* parser) {
 static JsonValue* json_parse_value(JsonParser* parser);
 static JsonValue* json_parse_array(JsonParser* parser);
 static JsonValue* json_parse_object(JsonParser* parser);
-static JsonValue* json_parse_string_literal(JsonParser* parser);  // Renommé
+static JsonValue* json_parse_string_literal(JsonParser* parser);
 static JsonValue* json_parse_number(JsonParser* parser);
 static JsonValue* json_parse_literal(JsonParser* parser);
 
 // Fonction publique pour parser une chaîne JSON
 JsonValue* json_parse_string(const char* str) {
+    if (!str) return NULL;
+    
     JsonParser parser;
     parser.start = str;
     parser.current = str;
@@ -77,10 +107,14 @@ JsonValue* json_parse_string(const char* str) {
 static JsonValue* json_parse_value(JsonParser* parser) {
     json_skip_whitespace(parser);
     
+    if (json_is_at_end(parser)) {
+        return NULL;
+    }
+    
     char c = json_peek(parser);
     
     if (c == '"') {
-        return json_parse_string_literal(parser);  // Utilise le nouveau nom
+        return json_parse_string_literal(parser);
     } else if (c == '[') {
         return json_parse_array(parser);
     } else if (c == '{') {
@@ -185,7 +219,7 @@ static JsonValue* json_parse_object(JsonParser* parser) {
             return NULL;
         }
         
-        JsonValue* key_json = json_parse_string_literal(parser);  // Utilise le nouveau nom
+        JsonValue* key_json = json_parse_string_literal(parser);
         if (!key_json || key_json->type != JSON_STRING) {
             if (key_json) json_free(key_json);
             json_free(object);
@@ -255,7 +289,7 @@ static JsonValue* json_parse_object(JsonParser* parser) {
     return object;
 }
 
-static JsonValue* json_parse_string_literal(JsonParser* parser) {  // Renommé
+static JsonValue* json_parse_string_literal(JsonParser* parser) {
     // Skip opening quote
     json_advance(parser);
     
@@ -266,6 +300,9 @@ static JsonValue* json_parse_string_literal(JsonParser* parser) {  // Renommé
         if (json_peek(parser) == '\\') {
             // Skip escape character
             json_advance(parser);
+            if (json_is_at_end(parser)) {
+                return NULL;
+            }
         }
         json_advance(parser);
         length++;
@@ -289,8 +326,6 @@ static JsonValue* json_parse_string_literal(JsonParser* parser) {  // Renommé
         free(string_val);
         return NULL;
     }
-    
-    // TODO: Handle escape sequences properly
     
     return string_val;
 }
@@ -335,6 +370,10 @@ static JsonValue* json_parse_number(JsonParser* parser) {
     
     // Parse the number
     int length = parser->current - start;
+    if (length <= 0) {
+        return NULL;
+    }
+    
     char* num_str = str_ncopy(start, length);
     if (!num_str) return NULL;
     
@@ -384,6 +423,8 @@ static JsonValue* json_parse_literal(JsonParser* parser) {
 // ======================================================
 
 static void json_append_string(char** buffer, int* size, int* capacity, const char* str) {
+    if (!str) return;
+    
     int len = strlen(str);
     
     while (*size + len >= *capacity) {
@@ -414,7 +455,7 @@ static void json_stringify_value(JsonValue* json, char** buffer, int* size, int*
             
         case JSON_INT: {
             char num_str[32];
-            snprintf(num_str, sizeof(num_str), "%lld", (long long)json->as.int_val);  // Corrigé
+            snprintf(num_str, sizeof(num_str), "%lld", (long long)json->as.int_val);
             json_append_string(buffer, size, capacity, num_str);
             break;
         }
@@ -427,9 +468,10 @@ static void json_stringify_value(JsonValue* json, char** buffer, int* size, int*
         }
             
         case JSON_STRING: {
-            // TODO: Escape special characters
             json_append_string(buffer, size, capacity, "\"");
-            json_append_string(buffer, size, capacity, json->as.str_val);
+            if (json->as.str_val) {
+                json_append_string(buffer, size, capacity, json->as.str_val);
+            }
             json_append_string(buffer, size, capacity, "\"");
             break;
         }
@@ -458,7 +500,9 @@ static void json_stringify_value(JsonValue* json, char** buffer, int* size, int*
                 
                 // Key
                 json_append_string(buffer, size, capacity, "\"");
-                json_append_string(buffer, size, capacity, json->as.object.keys[i]);
+                if (json->as.object.keys[i]) {
+                    json_append_string(buffer, size, capacity, json->as.object.keys[i]);
+                }
                 json_append_string(buffer, size, capacity, "\":");
                 
                 // Value
@@ -478,12 +522,15 @@ char* json_stringify(JsonValue* json) {
     
     json_stringify_value(json, &buffer, &size, &capacity, 0);
     
-    if (buffer) {
+    if (buffer && size > 0) {
         buffer[size] = '\0';
         char* resized = REALLOC(buffer, char, size + 1);
         if (resized) {
             buffer = resized;
         }
+    } else if (buffer) {
+        free(buffer);
+        buffer = str_copy("null");
     }
     
     return buffer;
@@ -818,19 +865,16 @@ bool swiftflow_json_write_file(const char* filename, Value value) {
 }
 
 // ======================================================
-// [SECTION] BUILT-IN FUNCTIONS FOR SWIFTFLOW
+// [SECTION] FONCTIONS JSON POUR SWIFTFLOW (NON-STATIC)
 // ======================================================
 
-// Déclaration de value_to_raw_string depuis interpreter.c
-extern char* value_to_raw_string(Value value);
-
-static Value json_builtin_parse(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
+Value json_builtin_parse(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
     if (arg_count != 1) {
         interpreter_error(interpreter, "json.parse() expects 1 argument", 0, 0);
         return value_make_undefined();
     }
     
-    char* json_str = value_to_raw_string(args[0]);
+    char* json_str = json_value_to_string(args[0]);
     if (!json_str) {
         interpreter_error(interpreter, "Failed to convert to string", 0, 0);
         return value_make_undefined();
@@ -842,7 +886,7 @@ static Value json_builtin_parse(SwiftFlowInterpreter* interpreter, Value* args, 
     return result;
 }
 
-static Value json_builtin_stringify(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
+Value json_builtin_stringify(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
     if (arg_count != 1) {
         interpreter_error(interpreter, "json.stringify() expects 1 argument", 0, 0);
         return value_make_undefined();
@@ -859,7 +903,7 @@ static Value json_builtin_stringify(SwiftFlowInterpreter* interpreter, Value* ar
     return result;
 }
 
-static Value json_builtin_read_file(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
+Value json_builtin_read_file(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
     if (arg_count != 1) {
         interpreter_error(interpreter, "json.read_file() expects 1 argument", 0, 0);
         return value_make_undefined();
@@ -873,7 +917,7 @@ static Value json_builtin_read_file(SwiftFlowInterpreter* interpreter, Value* ar
     return swiftflow_json_read_file(args[0].as.str_val);
 }
 
-static Value json_builtin_write_file(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
+Value json_builtin_write_file(SwiftFlowInterpreter* interpreter, Value* args, int arg_count) {
     if (arg_count != 2) {
         interpreter_error(interpreter, "json.write_file() expects 2 arguments", 0, 0);
         return value_make_undefined();
@@ -893,8 +937,6 @@ static Value json_builtin_write_file(SwiftFlowInterpreter* interpreter, Value* a
 // ======================================================
 
 void jsonlib_register(SwiftFlowInterpreter* interpreter) {
-    // Register JSON functions in the interpreter
-    // Note: We need to modify interpreter.c to actually register these functions
-    // For now, we'll just declare the functions
+    // Cette fonction est appelée depuis interpreter.c
     (void)interpreter; // Mark as used to avoid warning
 }
