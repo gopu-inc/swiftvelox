@@ -1,11 +1,11 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "common.h"
-#include "lexer.h"
-#include "parser.h"
-#include "ast.h"
-#include "interpreter.h"
+#include <src/frontend/stdio.h>
+#include <src/frontend/stdlib.h>
+#include <src/frontend/string.h>
+#include "src/frontend/common.h"
+#include "src/frontend/lexer.h"
+#include "src/frontend/parser.h"
+#include "src/frontend/ast.h"
+#include "include/interpreter.h"
 
 // Global configuration
 SwiftFlowConfig* config = NULL;
