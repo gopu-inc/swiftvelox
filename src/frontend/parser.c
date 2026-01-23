@@ -2,7 +2,7 @@
 #include "common.h"
 #include <stdio.h>
 
-// Forward declarations
+// Forward declarations pour les fonctions internes
 static ASTNode* parse_expression(Parser* parser);
 static ASTNode* parse_assignment(Parser* parser);
 static ASTNode* parse_equality(Parser* parser);
@@ -13,6 +13,10 @@ static ASTNode* parse_unary(Parser* parser);
 static ASTNode* parse_primary(Parser* parser);
 static ASTNode* parse_list(Parser* parser);
 static ASTNode* parse_function_call(Parser* parser);
+static ASTNode* parse_expression_statement(Parser* parser);
+static ASTNode* parse_return_statement(Parser* parser);
+static ASTNode* parse_break_statement(Parser* parser);
+static ASTNode* parse_continue_statement(Parser* parser);
 
 // Parser initialization
 void parser_init(Parser* parser, Lexer* lexer) {
@@ -59,6 +63,20 @@ bool parser_check(Parser* parser, TokenKind kind) {
     return parser->current.kind == kind;
 }
 
+Token parser_advance(Parser* parser) {
+    parser->previous = parser->current;
+    
+    if (!parser->panic_mode) {
+        parser->current = lexer_next_token(parser->lexer);
+        
+        if (parser->current.kind == TK_ERROR) {
+            parser_error_at_current(parser, "Lexer error");
+        }
+    }
+    
+    return parser->previous;
+}
+
 Token parser_consume(Parser* parser, TokenKind kind, const char* error_message) {
     if (parser_check(parser, kind)) {
         return parser_advance(parser);
@@ -72,20 +90,6 @@ Token parser_consume(Parser* parser, TokenKind kind, const char* error_message) 
     error_token.line = parser->current.line;
     error_token.column = parser->current.column;
     return error_token;
-}
-
-Token parser_advance(Parser* parser) {
-    parser->previous = parser->current;
-    
-    if (!parser->panic_mode) {
-        parser->current = lexer_next_token(parser->lexer);
-        
-        if (parser->current.kind == TK_ERROR) {
-            parser_error_at_current(parser, "Lexer error");
-        }
-    }
-    
-    return parser->previous;
 }
 
 void parser_synchronize(Parser* parser) {
@@ -291,7 +295,7 @@ ASTNode* parse_for_statement(Parser* parser) {
 }
 
 // Parse return statement
-ASTNode* parse_return_statement(Parser* parser) {
+static ASTNode* parse_return_statement(Parser* parser) {
     int line = parser->previous.line;
     int column = parser->previous.column;
     
@@ -304,14 +308,14 @@ ASTNode* parse_return_statement(Parser* parser) {
 }
 
 // Parse break statement
-ASTNode* parse_break_statement(Parser* parser) {
+static ASTNode* parse_break_statement(Parser* parser) {
     int line = parser->previous.line;
     int column = parser->previous.column;
     return ast_new_node(NODE_BREAK, line, column);
 }
 
 // Parse continue statement
-ASTNode* parse_continue_statement(Parser* parser) {
+static ASTNode* parse_continue_statement(Parser* parser) {
     int line = parser->previous.line;
     int column = parser->previous.column;
     return ast_new_node(NODE_CONTINUE, line, column);
@@ -454,7 +458,7 @@ ASTNode* parse_block(Parser* parser) {
 }
 
 // Parse expression statement
-ASTNode* parse_expression_statement(Parser* parser) {
+static ASTNode* parse_expression_statement(Parser* parser) {
     ASTNode* expr = parse_expression(parser);
     if (!expr) {
         parser_error_at_current(parser, "Expected expression");
@@ -685,6 +689,47 @@ static ASTNode* parse_function_call(Parser* parser) {
     // This is a simplified version
     ASTNode* func = ast_new_node(NODE_FUNC_CALL, parser->previous.line, parser->previous.column);
     
-    // For now, return a placeholder
+    // Parse arguments
+    parser_consume(parser, TK_LPAREN, "Expected '(' after function name");
+    
+    ASTNode* args = NULL;
+    ASTNode** current_arg = &args;
+    
+    if (!parser_check(parser, TK_RPAREN)) {
+        do {
+            ASTNode* arg = parse_expression(parser);
+            if (!arg) {
+                ast_free(func);
+                return NULL;
+            }
+            
+            *current_arg = arg;
+            current_arg = &((*current_arg)->right);
+        } while (parser_match(parser, TK_COMMA));
+    }
+    
+    parser_consume(parser, TK_RPAREN, "Expected ')' after arguments");
+    
+    // Store the function name (from previous token)
+    func->left = ast_new_identifier(parser->previous.start, parser->previous.line, parser->previous.column);
+    func->right = args;
+    
     return func;
+}
+
+// Parse input statement
+ASTNode* parse_input_statement(Parser* parser) {
+    int line = parser->previous.line;
+    int column = parser->previous.column;
+    
+    parser_consume(parser, TK_LPAREN, "Expected '(' after 'input'");
+    
+    char* prompt = NULL;
+    if (parser_check(parser, TK_STRING)) {
+        Token prompt_token = parser_advance(parser);
+        prompt = str_ncopy(prompt_token.start + 1, prompt_token.length - 2);
+    }
+    
+    parser_consume(parser, TK_RPAREN, "Expected ')' after input prompt");
+    return ast_new_input(prompt, line, column);
 }
