@@ -150,70 +150,50 @@ char* read_stdin() {
     return buffer;
 }
 
-// Interpret SwiftFlow code
-int interpret_swiftflow(const char* source, const char* filename) {
-    LOG(LOG_INFO, "SwiftFlow Interpreter v%s", SWIFTFLOW_VERSION_STRING);
+// Parse and execute SwiftFlow code
+int execute_swiftflow(const char* source, const char* filename) {
+    if (!source || !source[0]) {
+        LOG(LOG_ERROR, "Empty source code");
+        return 1;
+    }
     
     // Lexical analysis
-    LOG(LOG_INFO, "Performing lexical analysis...");
+    if (config->verbose) {
+        LOG(LOG_INFO, "Performing lexical analysis...");
+    }
     
-    // On doit définir les structures ici car elles sont opaques dans les headers
-    struct {
-        const char* source;
-        const char* start;
-        const char* current;
-        int line;
-        int column;
-        Token current_token;
-        char* filename;
-    } lexer;
+    Lexer lexer;
+    lexer_init(&lexer, source, filename);
     
-    struct {
-        struct { /* on va juste utiliser un pointeur */ }* lexer;
-        Token current;
-        Token previous;
-        bool had_error;
-        bool panic_mode;
-    } parser;
+    // Create parser
+    Parser parser;
+    parser_init(&parser, &lexer);
     
-    // Initialiser le lexer avec notre propre fonction
-    // Simuler lexer_init
-    lexer.source = source;
-    lexer.start = source;
-    lexer.current = source;
-    lexer.line = 1;
-    lexer.column = 1;
-    lexer.filename = str_copy(filename ? filename : "<stdin>");
+    // Parse the program
+    if (config->verbose) {
+        LOG(LOG_INFO, "Parsing program...");
+    }
     
-    // Pour simplifier, on va juste créer un AST de test
-    LOG(LOG_INFO, "Creating test AST...");
+    ASTNode* ast = parse_program(&parser);
     
-    // Créer un AST simple pour tester
-    ASTNode* ast = ast_new_node(NODE_PROGRAM, 1, 1);
+    if (parser.had_error) {
+        LOG(LOG_ERROR, "Parse errors occurred");
+        if (ast) ast_free(ast);
+        free(lexer.filename);
+        return 1;
+    }
     
-    // Créer un print statement
-    ASTNode* print_stmt = ast_new_print(
-        ast_new_string("Hello from SwiftFlow!", 1, 1),
-        1, 1
-    );
+    if (!ast) {
+        LOG(LOG_ERROR, "Failed to parse program");
+        free(lexer.filename);
+        return 1;
+    }
     
-    // Créer une déclaration de variable
-    ASTNode* var_decl = ast_new_var_decl(
-        "test_var",
-        ast_new_int(42, 2, 10),
-        TK_VAR,
-        2, 1
-    );
+    if (config->verbose) {
+        LOG(LOG_INFO, "AST generated successfully");
+    }
     
-    // Créer un bloc avec ces deux statements
-    ASTNode* block = ast_new_node(NODE_BLOCK, 1, 1);
-    block->left = print_stmt;
-    print_stmt->right = var_decl;
-    
-    ast->left = block;
-    
-    LOG(LOG_INFO, "AST generated successfully");
-    
+    // Print AST in debug mode
     if (config->debug) {
         printf("\n%s=== AST Structure ===%s\n", COLOR_CYAN, COLOR_RESET);
         ast_print(ast, 0);
@@ -222,7 +202,9 @@ int interpret_swiftflow(const char* source, const char* filename) {
     
     // Optimize AST if requested
     if (config->optimize) {
-        LOG(LOG_INFO, "Optimizing AST...");
+        if (config->verbose) {
+            LOG(LOG_INFO, "Optimizing AST...");
+        }
         ASTNode* optimized = ast_optimize(ast);
         if (optimized != ast) {
             ast_free(ast);
@@ -231,11 +213,15 @@ int interpret_swiftflow(const char* source, const char* filename) {
     }
     
     // Create interpreter and run
-    LOG(LOG_INFO, "Starting interpretation...");
-    struct SwiftFlowInterpreter* interpreter = interpreter_new();
+    if (config->verbose) {
+        LOG(LOG_INFO, "Starting interpretation...");
+    }
+    
+    SwiftFlowInterpreter* interpreter = interpreter_new();
     if (!interpreter) {
         LOG(LOG_ERROR, "Failed to create interpreter");
         ast_free(ast);
+        free(lexer.filename);
         return 1;
     }
     
@@ -257,11 +243,80 @@ int interpret_swiftflow(const char* source, const char* filename) {
     ast_free(ast);
     free(lexer.filename);
     
-    if (result == 0) {
+    if (result == 0 && config->verbose) {
         LOG(LOG_INFO, "Interpretation completed successfully");
     }
     
     return result;
+}
+
+// Simple REPL mode
+void run_repl() {
+    printf("%sSwiftFlow REPL v%s%s\n", COLOR_CYAN, SWIFTFLOW_VERSION_STRING, COLOR_RESET);
+    printf("Type 'exit', 'quit', or Ctrl+D to exit\n");
+    printf("Type 'help' for available commands\n\n");
+    
+    char line[1024];
+    int line_num = 1;
+    
+    while (1) {
+        printf("swiftflow> ");
+        fflush(stdout);
+        
+        if (!fgets(line, sizeof(line), stdin)) {
+            printf("\n");
+            break;
+        }
+        
+        // Remove newline
+        line[strcspn(line, "\n")] = '\0';
+        
+        // Check for REPL commands
+        if (strlen(line) == 0) {
+            continue;
+        }
+        
+        if (strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0) {
+            break;
+        }
+        
+        if (strcmp(line, "help") == 0) {
+            printf("REPL commands:\n");
+            printf("  exit, quit  - Exit the REPL\n");
+            printf("  help        - Show this help\n");
+            printf("  clear       - Clear screen\n");
+            continue;
+        }
+        
+        if (strcmp(line, "clear") == 0) {
+            printf("\033[2J\033[H"); // Clear screen
+            continue;
+        }
+        
+        // Execute the line
+        SwiftFlowConfig* repl_config = config_create_default();
+        repl_config->debug = config->debug;
+        repl_config->verbose = config->verbose;
+        repl_config->warnings = config->warnings;
+        
+        // Temporarily replace global config
+        SwiftFlowConfig* old_config = config;
+        config = repl_config;
+        
+        int result = execute_swiftflow(line, "<repl>");
+        
+        // Restore config
+        config = old_config;
+        config_free(repl_config);
+        
+        if (result != 0) {
+            printf("%sExecution failed%s\n", COLOR_RED, COLOR_RESET);
+        }
+        
+        line_num++;
+    }
+    
+    printf("\nGoodbye!\n");
 }
 
 int main(int argc, char** argv) {
@@ -269,28 +324,49 @@ int main(int argc, char** argv) {
     
     char* source = NULL;
     char* filename = config->input_file;
+    int result = 0;
     
     if (!filename || strcmp(filename, "-") == 0) {
-        // Read from stdin
-        printf("%sReading from stdin...%s\n", COLOR_YELLOW, COLOR_RESET);
-        printf("%sEnter SwiftFlow code (Ctrl+D to finish):%s\n", COLOR_CYAN, COLOR_RESET);
-        source = read_stdin();
-        filename = "<stdin>";
+        // REPL mode or read from stdin
+        if (isatty(fileno(stdin))) {
+            // Interactive REPL
+            run_repl();
+        } else {
+            // Read from stdin (piped input)
+            printf("%sReading from stdin...%s\n", COLOR_YELLOW, COLOR_RESET);
+            source = read_stdin();
+            filename = "<stdin>";
+            
+            if (!source) {
+                LOG(LOG_ERROR, "Failed to read from stdin");
+                config_free(config);
+                return 1;
+            }
+            
+            result = execute_swiftflow(source, filename);
+            free(source);
+        }
     } else {
         // Read from file
+        if (!str_endswith(filename, ".swf")) {
+            LOG(LOG_WARNING, "File '%s' doesn't have .swf extension", filename);
+        }
+        
         source = read_file(filename);
+        if (!source) {
+            LOG(LOG_ERROR, "Failed to read file: %s", filename);
+            config_free(config);
+            return 1;
+        }
+        
+        if (config->verbose) {
+            LOG(LOG_INFO, "Executing file: %s", filename);
+        }
+        
+        result = execute_swiftflow(source, filename);
+        free(source);
     }
     
-    if (!source) {
-        LOG(LOG_ERROR, "Failed to read input");
-        config_free(config);
-        return 1;
-    }
-    
-    int result = interpret_swiftflow(source, filename);
-    
-    free(source);
     config_free(config);
-    
     return result;
 }
