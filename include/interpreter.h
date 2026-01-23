@@ -20,7 +20,7 @@ void interpreter_error(SwiftFlowInterpreter* interpreter, const char* message, i
 void interpreter_register_builtins(SwiftFlowInterpreter* interpreter);
 
 // Value operations
-char* value_to_raw_string(Value value);  // <-- pour le support json
+// char* value_to_raw_string(Value value);  // <-- pour le support json
 char* value_to_string(Value value);
 void value_print(Value value);
 bool value_is_truthy(Value value);
