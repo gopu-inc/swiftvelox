@@ -636,7 +636,12 @@ static Builtin builtins[] = {
     {"lower", builtin_lower, 1, 1},         // 1 argument
     {"time", builtin_time, 0, 0},           // 0 arguments
     {"exit", builtin_exit, 0, 1},           // 0-1 arguments
-    {NULL, NULL, 0, 0}                      // Sentinel
+    {NULL, NULL, 0, 0}, 
+    {"__json_parse__", json_builtin_parse, 1, 1},
+    {"__json_stringify__", json_builtin_stringify, 1, 1},
+    {"__json_read_file__", json_builtin_read_file, 1, 1},
+    {"__json_write_file__", json_builtin_write_file, 2, 2},
+    // Sentinel
 };
 
 // ======================================================
