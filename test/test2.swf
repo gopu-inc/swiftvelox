@@ -1,5 +1,0 @@
-# Test des imports locaux
-import() {"./math.swf"};  # Cherche dans le répertoire courant
-
-var y = 20;
-print(y);

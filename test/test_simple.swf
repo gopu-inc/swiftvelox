@@ -1,8 +1,0 @@
-# Test simple
-var x = 10;
-var y = 3.14;
-var z = "Hello";
-
-print("x = " + x);
-print("y = " + y);
-print("z = " + z);

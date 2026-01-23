@@ -1,9 +1,0 @@
-var FI = 1.00;
-var NET = 3.00;
-
-print(FI);
-print("et plus petit que");
-print(NET);
-print(NET);
-print("et plus grand que");
-print(FI);

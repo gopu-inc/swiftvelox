@@ -1,8 +1,0 @@
-// test_import_local.swf
-import "./utils.swf";
-
-print("Version: " + VERSION);
-print("Auteur: " + AUTHOR);
-
-var result = add(10, 20);
-print("10 + 20 = " + result);

@@ -1,4 +1,0 @@
-import() {"math"};
-
-var x = 10;
-print(x);

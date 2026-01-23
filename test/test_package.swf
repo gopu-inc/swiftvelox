@@ -1,7 +1,0 @@
-# Test d'import de package avec exports
-print("Début du test...");
-
-# D'abord importer le package complet
-import() {"math"};
-
-print("Test terminé!");

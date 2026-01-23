@@ -1,0 +1,20 @@
+// test_json.swf
+print("Testing JSON package...")
+
+// Test 1: Parse simple JSON
+var json_str = '{"name": "SwiftFlow", "version": 1.0, "active": true}'
+var data = __json_parse__(json_str)
+print("Data type: " + typeof(data))
+
+// Test 2: Stringify
+var obj = {"language": "test", "numbers": [1, 2, 3]}
+var json_result = __json_stringify__(obj)
+print("JSON result: " + json_result)
+
+// Test 3: Parse array
+var array_json = '[1, "hello", true, null]'
+var array_data = __json_parse__(array_json)
+print("Array type: " + typeof(array_data))
+
+print("JSON tests complete!")
+

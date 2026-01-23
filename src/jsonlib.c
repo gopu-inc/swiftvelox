@@ -1,5 +1,9 @@
 #include "common.h"
-#include <jansson.h>
+#include <jsonlib.h>
+#include "interpreter.h"
+#include <stdio.h>
+#include <ctype.h>
+#include <string.h>
 
 // SwiftFlow JSON library using Jansson
 

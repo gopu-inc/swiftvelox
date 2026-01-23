@@ -1,5 +1,0 @@
-var FI = 1.00;
-var NET = 3.00;
-
-print(FI + " et plus petit que " + NET);
-print(NET + " et plus grand que " + FI);
