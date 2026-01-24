@@ -228,6 +228,24 @@ static const Keyword keywords[] = {
 // ======================================================
 typedef enum {
     // Expressions
+    // Dans common.h, ajoute dans NodeType :
+    NODE_FILE_OPEN,        // Ouvrir un fichier
+    NODE_FILE_CLOSE,       // Fermer un fichier   
+    NODE_FILE_READ,        // Lire depuis un fichier
+    NODE_FILE_WRITE,       // Écrire dans un fichier
+    NODE_FILE_SEEK,        // Déplacer le curseur
+    NODE_FILE_TELL,        // Position actuelle
+    NODE_FILE_FLUSH,       // Vider le buffer
+    NODE_FILE_STAT,        // Infos fichier
+    NODE_FILE_REMOVE,      // Supprimer fichier
+    NODE_FILE_RENAME,      // Renommer fichier
+    NODE_FILE_COPY,        // Copier fichier
+    NODE_DIR_CREATE,       // Créer dossier 
+    NODE_DIR_LIST,         // Lister dossier
+    NODE_DIR_REMOVE,       // Supprimer dossier
+    NODE_PATH_EXISTS,      // Vérifier existence
+    NODE_PATH_ISFILE,      // Vérifier si fichier
+    NODE_PATH_ISDIR,       // Vérifier si dossier
     NODE_INT,
     NODE_FLOAT,
     NODE_STRING,
