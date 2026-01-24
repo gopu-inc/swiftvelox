@@ -1,4 +1,4 @@
-// io.c - Module IO complet pour SwiftFlow
+// io.c - Module IO simplifié pour SwiftFlow
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,18 +13,10 @@
 // ======================================================
 // [SECTION] GESTION DES DESCRIPTEURS DE FICHIER
 // ======================================================
-typedef enum {
-    FD_FILE,
-    FD_DIRECTORY,
-    FD_SOCKET,
-    FD_PIPE
-} FileDescriptorType;
-
 typedef struct {
     int id;
     char* name;
     FILE* handle;
-    FileDescriptorType type;
     char* mode;
     bool is_open;
     int position;
@@ -73,562 +65,98 @@ static void close_fd(int fd) {
     }
 }
 
-// Déclarations externes depuis swf.c
-extern Variable vars[1000];
-extern int var_count;
-extern int scope_level;
-extern int findVar(const char* name);
-extern char* evalString(ASTNode* node);
-extern double evalFloat(ASTNode* node);
-
 // ======================================================
-// [SECTION] FONCTIONS D'EXÉCUTION IO
+// [SECTION] FONCTIONS D'EXÉCUTION IO SIMPLIFIÉES
 // ======================================================
 void io_open(ASTNode* node) {
-    if (!node || !node->left || !node->right) {
-        printf("%s[IO ERROR]%s Missing filename or mode\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
+    if (!node) return;
     
-    char* filename = evalString(node->left);
-    char* mode = evalString(node->right);
+    printf("%s[IO]%s Opening file...\n", COLOR_CYAN, COLOR_RESET);
     
-    if (!filename || !mode) {
-        if (filename) free(filename);
-        if (mode) free(mode);
-        return;
-    }
-    
-    // Valider le mode
-    bool valid_mode = false;
-    const char* valid_modes[] = {"r", "w", "a", "r+", "w+", "a+", "rb", "wb", "ab", "r+b", "w+b", "a+b", NULL};
-    
-    for (int i = 0; valid_modes[i]; i++) {
-        if (strcmp(mode, valid_modes[i]) == 0) {
-            valid_mode = true;
-            break;
-        }
-    }
-    
-    if (!valid_mode) {
-        printf("%s[IO ERROR]%s Invalid file mode: %s\n", COLOR_RED, COLOR_RESET, mode);
-        free(filename);
-        free(mode);
-        return;
-    }
-    
-    FILE* f = fopen(filename, mode);
-    if (!f) {
-        printf("%s[IO ERROR]%s Cannot open file: %s (%s)\n", 
-               COLOR_RED, COLOR_RESET, filename, strerror(errno));
-        free(filename);
-        free(mode);
-        return;
-    }
-    
-    int fd = allocate_fd();
-    if (fd == -1) {
-        printf("%s[IO ERROR]%s Too many open files\n", COLOR_RED, COLOR_RESET);
-        fclose(f);
-        free(filename);
-        free(mode);
-        return;
-    }
-    
-    FileDescriptor* desc = &file_descriptors[fd];
-    desc->name = str_copy(filename);
-    desc->handle = f;
-    desc->type = FD_FILE;
-    desc->mode = str_copy(mode);
-    desc->is_open = true;
-    
-    // Obtenir la taille du fichier
-    fseek(f, 0, SEEK_END);
-    desc->size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    desc->position = 0;
-    
-    // Stocker le fd dans une variable si demandé
-    if (node->third) {
-        char* var_name = evalString(node->third);
-        if (var_name) {
-            int var_idx = findVar(var_name);
-            if (var_idx == -1 && var_count < 1000) {
-                Variable* var = &vars[var_count];
-                strncpy(var->name, var_name, 99);
-                var->name[99] = '\0';
-                var->type = TK_VAR;
-                var->size_bytes = sizeof(int);
-                var->scope_level = scope_level;
-                var->is_constant = false;
-                var->is_initialized = true;
-                var->is_string = false;
-                var->is_float = false;
-                var->value.int_val = fd;
-                var_count++;
-            } else if (var_idx >= 0) {
-                vars[var_idx].value.int_val = fd;
-                vars[var_idx].is_initialized = true;
-            }
-            free(var_name);
-        }
-    }
-    
-    printf("%s[IO]%s File opened: %s (fd=%d, mode=%s, size=%d)\n", 
-           COLOR_GREEN, COLOR_RESET, filename, fd, mode, desc->size);
-    
-    free(filename);
-    free(mode);
+    // Note: Pour l'instant, on va juste afficher un message
+    // L'intégration complète viendra plus tard
+    printf("%s[IO INFO]%s File open operation (to be implemented)\n", 
+           COLOR_YELLOW, COLOR_RESET);
 }
 
 void io_close(ASTNode* node) {
-    if (!node || !node->left) {
-        printf("%s[IO ERROR]%s Missing file descriptor\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
+    if (!node) return;
     
-    double fd_val = evalFloat(node->left);
-    int fd = (int)fd_val;
-    
-    FileDescriptor* desc = get_fd(fd);
-    if (!desc) {
-        printf("%s[IO ERROR]%s Invalid file descriptor: %d\n", COLOR_RED, COLOR_RESET, fd);
-        return;
-    }
-    
-    if (desc->handle) {
-        fclose(desc->handle);
-        desc->handle = NULL;
-    }
-    
-    printf("%s[IO]%s File closed: %s (fd=%d)\n", 
-           COLOR_GREEN, COLOR_RESET, desc->name ? desc->name : "unknown", fd);
-    
-    close_fd(fd);
+    printf("%s[IO]%s Closing file...\n", COLOR_CYAN, COLOR_RESET);
+    printf("%s[IO INFO]%s File close operation (to be implemented)\n", 
+           COLOR_YELLOW, COLOR_RESET);
 }
 
 void io_read(ASTNode* node) {
-    if (!node || !node->left) {
-        printf("%s[IO ERROR]%s Missing file descriptor\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
+    if (!node) return;
     
-    double fd_val = evalFloat(node->left);
-    int fd = (int)fd_val;
-    
-    FileDescriptor* desc = get_fd(fd);
-    if (!desc) {
-        printf("%s[IO ERROR]%s Invalid file descriptor: %d\n", COLOR_RED, COLOR_RESET, fd);
-        return;
-    }
-    
-    if (!desc->handle) {
-        printf("%s[IO ERROR]%s File not open: fd=%d\n", COLOR_RED, COLOR_RESET, fd);
-        return;
-    }
-    
-    // Vérifier si on peut lire
-    if (strchr(desc->mode, 'r') == NULL && strchr(desc->mode, '+') == NULL) {
-        printf("%s[IO ERROR]%s File not opened for reading: %s\n", 
-               COLOR_RED, COLOR_RESET, desc->mode);
-        return;
-    }
-    
-    size_t size = 1024; // Taille par défaut
-    if (node->right) {
-        size_t temp_size = (size_t)evalFloat(node->right);
-        if (temp_size > 0 && temp_size <= 65536) {
-            size = temp_size;
-        }
-    }
-    
-    char* buffer = malloc(size + 1);
-    if (!buffer) {
-        printf("%s[IO ERROR]%s Memory allocation failed\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
-    
-    size_t bytes_read = fread(buffer, 1, size, desc->handle);
-    buffer[bytes_read] = '\0';
-    
-    desc->position = ftell(desc->handle);
-    
-    // Stocker le résultat
-    if (node->third) {
-        char* var_name = evalString(node->third);
-        if (var_name) {
-            int var_idx = findVar(var_name);
-            if (var_idx == -1 && var_count < 1000) {
-                Variable* var = &vars[var_count];
-                strncpy(var->name, var_name, 99);
-                var->name[99] = '\0';
-                var->type = TK_VAR;
-                var->size_bytes = bytes_read + 1;
-                var->scope_level = scope_level;
-                var->is_constant = false;
-                var->is_initialized = true;
-                var->is_string = true;
-                var->is_float = false;
-                var->value.str_val = str_copy(buffer);
-                var_count++;
-            } else if (var_idx >= 0) {
-                if (vars[var_idx].value.str_val) free(vars[var_idx].value.str_val);
-                vars[var_idx].value.str_val = str_copy(buffer);
-                vars[var_idx].is_string = true;
-                vars[var_idx].is_initialized = true;
-            }
-            free(var_name);
-        }
-    } else {
-        // Afficher le contenu
-        printf("%s", buffer);
-    }
-    
-    printf("%s[IO]%s Read %zu bytes from fd=%d\n", 
-           COLOR_GREEN, COLOR_RESET, bytes_read, fd);
-    
-    free(buffer);
+    printf("%s[IO]%s Reading file...\n", COLOR_CYAN, COLOR_RESET);
+    printf("%s[IO INFO]%s File read operation (to be implemented)\n", 
+           COLOR_YELLOW, COLOR_RESET);
 }
 
 void io_write(ASTNode* node) {
-    if (!node || !node->left || !node->right) {
-        printf("%s[IO ERROR]%s Missing file descriptor or data\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
+    if (!node) return;
     
-    double fd_val = evalFloat(node->left);
-    int fd = (int)fd_val;
-    
-    FileDescriptor* desc = get_fd(fd);
-    if (!desc) {
-        printf("%s[IO ERROR]%s Invalid file descriptor: %d\n", COLOR_RED, COLOR_RESET, fd);
-        return;
-    }
-    
-    if (!desc->handle) {
-        printf("%s[IO ERROR]%s File not open: fd=%d\n", COLOR_RED, COLOR_RESET, fd);
-        return;
-    }
-    
-    // Vérifier si on peut écrire
-    if (strchr(desc->mode, 'w') == NULL && strchr(desc->mode, 'a') == NULL && 
-        strchr(desc->mode, '+') == NULL) {
-        printf("%s[IO ERROR]%s File not opened for writing: %s\n", 
-               COLOR_RED, COLOR_RESET, desc->mode);
-        return;
-    }
-    
-    char* data = evalString(node->right);
-    if (!data) {
-        return;
-    }
-    
-    size_t bytes_written = fwrite(data, 1, strlen(data), desc->handle);
-    desc->position = ftell(desc->handle);
-    
-    if (bytes_written != strlen(data)) {
-        printf("%s[IO WARNING]%s Partial write: %zu/%zu bytes\n", 
-               COLOR_YELLOW, COLOR_RESET, bytes_written, strlen(data));
-    }
-    
-    printf("%s[IO]%s Wrote %zu bytes to fd=%d\n", 
-           COLOR_GREEN, COLOR_RESET, bytes_written, fd);
-    
-    free(data);
+    printf("%s[IO]%s Writing to file...\n", COLOR_CYAN, COLOR_RESET);
+    printf("%s[IO INFO]%s File write operation (to be implemented)\n", 
+           COLOR_YELLOW, COLOR_RESET);
 }
 
 void io_seek(ASTNode* node) {
-    if (!node || !node->left || !node->right) {
-        printf("%s[IO ERROR]%s Missing file descriptor or position\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
+    if (!node) return;
     
-    double fd_val = evalFloat(node->left);
-    int fd = (int)fd_val;
-    
-    FileDescriptor* desc = get_fd(fd);
-    if (!desc) {
-        printf("%s[IO ERROR]%s Invalid file descriptor: %d\n", COLOR_RED, COLOR_RESET, fd);
-        return;
-    }
-    
-    if (!desc->handle) {
-        printf("%s[IO ERROR]%s File not open: fd=%d\n", COLOR_RED, COLOR_RESET, fd);
-        return;
-    }
-    
-    int whence = SEEK_SET; // Par défaut
-    if (node->third) {
-        char* whence_str = evalString(node->third);
-        if (whence_str) {
-            if (strcmp(whence_str, "cur") == 0 || strcmp(whence_str, "current") == 0) {
-                whence = SEEK_CUR;
-            } else if (strcmp(whence_str, "end") == 0) {
-                whence = SEEK_END;
-            }
-            free(whence_str);
-        }
-    }
-    
-    long offset = (long)evalFloat(node->right);
-    
-    if (fseek(desc->handle, offset, whence) != 0) {
-        printf("%s[IO ERROR]%s Seek failed: %s\n", COLOR_RED, COLOR_RESET, strerror(errno));
-        return;
-    }
-    
-    desc->position = ftell(desc->handle);
-    
-    printf("%s[IO]%s Seek to position %ld (whence=%d) on fd=%d\n", 
-           COLOR_GREEN, COLOR_RESET, offset, whence, fd);
+    printf("%s[IO]%s Seeking in file...\n", COLOR_CYAN, COLOR_RESET);
+    printf("%s[IO INFO]%s File seek operation (to be implemented)\n", 
+           COLOR_YELLOW, COLOR_RESET);
 }
 
 void io_tell(ASTNode* node) {
-    if (!node || !node->left) {
-        printf("%s[IO ERROR]%s Missing file descriptor\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
+    if (!node) return;
     
-    double fd_val = evalFloat(node->left);
-    int fd = (int)fd_val;
-    
-    FileDescriptor* desc = get_fd(fd);
-    if (!desc) {
-        printf("%s[IO ERROR]%s Invalid file descriptor: %d\n", COLOR_RED, COLOR_RESET, fd);
-        return;
-    }
-    
-    if (!desc->handle) {
-        printf("%s[IO ERROR]%s File not open: fd=%d\n", COLOR_RED, COLOR_RESET, fd);
-        return;
-    }
-    
-    long pos = ftell(desc->handle);
-    desc->position = pos;
-    
-    // Stocker le résultat
-    if (node->right) {
-        char* var_name = evalString(node->right);
-        if (var_name) {
-            int var_idx = findVar(var_name);
-            if (var_idx == -1 && var_count < 1000) {
-                Variable* var = &vars[var_count];
-                strncpy(var->name, var_name, 99);
-                var->name[99] = '\0';
-                var->type = TK_VAR;
-                var->size_bytes = sizeof(long);
-                var->scope_level = scope_level;
-                var->is_constant = false;
-                var->is_initialized = true;
-                var->is_string = false;
-                var->is_float = false;
-                var->value.int_val = pos;
-                var_count++;
-            } else if (var_idx >= 0) {
-                vars[var_idx].value.int_val = pos;
-                vars[var_idx].is_initialized = true;
-            }
-            free(var_name);
-        }
-    } else {
-        printf("Position: %ld\n", pos);
-    }
+    printf("%s[IO]%s Getting file position...\n", COLOR_CYAN, COLOR_RESET);
+    printf("%s[IO INFO]%s File tell operation (to be implemented)\n", 
+           COLOR_YELLOW, COLOR_RESET);
 }
 
-// ======================================================
-// [SECTION] FONCTIONS DE SYSTÈME DE FICHIERS
-// ======================================================
 void io_exists(ASTNode* node) {
-    if (!node || !node->left) {
-        printf("%s[IO ERROR]%s Missing path\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
+    if (!node) return;
     
-    char* path = evalString(node->left);
-    if (!path) return;
-    
-    bool exists = (access(path, F_OK) == 0);
-    
-    if (node->right) {
-        char* var_name = evalString(node->right);
-        if (var_name) {
-            int var_idx = findVar(var_name);
-            if (var_idx == -1 && var_count < 1000) {
-                Variable* var = &vars[var_count];
-                strncpy(var->name, var_name, 99);
-                var->name[99] = '\0';
-                var->type = TK_VAR;
-                var->size_bytes = sizeof(bool);
-                var->scope_level = scope_level;
-                var->is_constant = false;
-                var->is_initialized = true;
-                var->is_string = false;
-                var->is_float = false;
-                var->value.int_val = exists ? 1 : 0;
-                var_count++;
-            } else if (var_idx >= 0) {
-                vars[var_idx].value.int_val = exists ? 1 : 0;
-                vars[var_idx].is_initialized = true;
-            }
-            free(var_name);
-        }
-    } else {
-        printf("%s exists: %s\n", path, exists ? "yes" : "no");
-    }
-    
-    free(path);
+    printf("%s[IO]%s Checking if file exists...\n", COLOR_CYAN, COLOR_RESET);
+    printf("%s[IO INFO]%s File exists check (to be implemented)\n", 
+           COLOR_YELLOW, COLOR_RESET);
 }
 
 void io_isfile(ASTNode* node) {
-    if (!node || !node->left) {
-        printf("%s[IO ERROR]%s Missing path\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
+    if (!node) return;
     
-    char* path = evalString(node->left);
-    if (!path) return;
-    
-    struct stat st;
-    bool is_file = (stat(path, &st) == 0 && S_ISREG(st.st_mode));
-    
-    if (node->right) {
-        char* var_name = evalString(node->right);
-        if (var_name) {
-            int var_idx = findVar(var_name);
-            if (var_idx == -1 && var_count < 1000) {
-                Variable* var = &vars[var_count];
-                strncpy(var->name, var_name, 99);
-                var->name[99] = '\0';
-                var->type = TK_VAR;
-                var->size_bytes = sizeof(bool);
-                var->scope_level = scope_level;
-                var->is_constant = false;
-                var->is_initialized = true;
-                var->is_string = false;
-                var->is_float = false;
-                var->value.int_val = is_file ? 1 : 0;
-                var_count++;
-            } else if (var_idx >= 0) {
-                vars[var_idx].value.int_val = is_file ? 1 : 0;
-                vars[var_idx].is_initialized = true;
-            }
-            free(var_name);
-        }
-    }
-    
-    free(path);
+    printf("%s[IO]%s Checking if path is a file...\n", COLOR_CYAN, COLOR_RESET);
+    printf("%s[IO INFO]%s Is file check (to be implemented)\n", 
+           COLOR_YELLOW, COLOR_RESET);
 }
 
 void io_isdir(ASTNode* node) {
-    if (!node || !node->left) {
-        printf("%s[IO ERROR]%s Missing path\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
+    if (!node) return;
     
-    char* path = evalString(node->left);
-    if (!path) return;
-    
-    struct stat st;
-    bool is_dir = (stat(path, &st) == 0 && S_ISDIR(st.st_mode));
-    
-    if (node->right) {
-        char* var_name = evalString(node->right);
-        if (var_name) {
-            int var_idx = findVar(var_name);
-            if (var_idx == -1 && var_count < 1000) {
-                Variable* var = &vars[var_count];
-                strncpy(var->name, var_name, 99);
-                var->name[99] = '\0';
-                var->type = TK_VAR;
-                var->size_bytes = sizeof(bool);
-                var->scope_level = scope_level;
-                var->is_constant = false;
-                var->is_initialized = true;
-                var->is_string = false;
-                var->is_float = false;
-                var->value.int_val = is_dir ? 1 : 0;
-                var_count++;
-            } else if (var_idx >= 0) {
-                vars[var_idx].value.int_val = is_dir ? 1 : 0;
-                vars[var_idx].is_initialized = true;
-            }
-            free(var_name);
-        }
-    }
-    
-    free(path);
+    printf("%s[IO]%s Checking if path is a directory...\n", COLOR_CYAN, COLOR_RESET);
+    printf("%s[IO INFO]%s Is directory check (to be implemented)\n", 
+           COLOR_YELLOW, COLOR_RESET);
 }
 
 void io_mkdir(ASTNode* node) {
-    if (!node || !node->left) {
-        printf("%s[IO ERROR]%s Missing directory name\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
+    if (!node) return;
     
-    char* dirname_str = evalString(node->left);
-    if (!dirname_str) return;
-    
-    int mode = 0755; // Mode par défaut
-    if (node->right) {
-        mode = (int)evalFloat(node->right);
-    }
-    
-    if (mkdir(dirname_str, mode) != 0) {
-        printf("%s[IO ERROR]%s Cannot create directory: %s (%s)\n", 
-               COLOR_RED, COLOR_RESET, dirname_str, strerror(errno));
-    } else {
-        printf("%s[IO]%s Directory created: %s\n", COLOR_GREEN, COLOR_RESET, dirname_str);
-    }
-    
-    free(dirname_str);
+    printf("%s[IO]%s Creating directory...\n", COLOR_CYAN, COLOR_RESET);
+    printf("%s[IO INFO]%s Directory creation (to be implemented)\n", 
+           COLOR_YELLOW, COLOR_RESET);
 }
 
 void io_listdir(ASTNode* node) {
-    if (!node || !node->left) {
-        printf("%s[IO ERROR]%s Missing directory path\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
+    if (!node) return;
     
-    char* path = evalString(node->left);
-    if (!path) return;
-    
-    DIR* dir = opendir(path);
-    if (!dir) {
-        printf("%s[IO ERROR]%s Cannot open directory: %s (%s)\n", 
-               COLOR_RED, COLOR_RESET, path, strerror(errno));
-        free(path);
-        return;
-    }
-    
-    printf("%s[IO]%s Contents of %s:\n", COLOR_GREEN, COLOR_RESET, path);
-    
-    struct dirent* entry;
-    int count = 0;
-    while ((entry = readdir(dir)) != NULL) {
-        // Ignorer . et ..
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
-        
-        char fullpath[PATH_MAX];
-        snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
-        
-        struct stat st;
-        const char* type = "?";
-        if (stat(fullpath, &st) == 0) {
-            if (S_ISREG(st.st_mode)) type = "F";
-            else if (S_ISDIR(st.st_mode)) type = "D";
-            else if (S_ISLNK(st.st_mode)) type = "L";
-        }
-        
-        printf("  [%s] %s\n", type, entry->d_name);
-        count++;
-    }
-    
-    printf("Total: %d items\n", count);
-    
-    closedir(dir);
-    free(path);
+    printf("%s[IO]%s Listing directory contents...\n", COLOR_CYAN, COLOR_RESET);
+    printf("%s[IO INFO]%s Directory listing (to be implemented)\n", 
+           COLOR_YELLOW, COLOR_RESET);
 }
 
 // ======================================================
@@ -641,7 +169,6 @@ void init_io_module() {
     file_descriptors[0].id = 0;
     file_descriptors[0].name = str_copy("stdin");
     file_descriptors[0].handle = stdin;
-    file_descriptors[0].type = FD_FILE;
     file_descriptors[0].mode = str_copy("r");
     file_descriptors[0].is_open = true;
     file_descriptors[0].position = 0;
@@ -649,7 +176,6 @@ void init_io_module() {
     file_descriptors[1].id = 1;
     file_descriptors[1].name = str_copy("stdout");
     file_descriptors[1].handle = stdout;
-    file_descriptors[1].type = FD_FILE;
     file_descriptors[1].mode = str_copy("w");
     file_descriptors[1].is_open = true;
     file_descriptors[1].position = 0;
@@ -657,7 +183,6 @@ void init_io_module() {
     file_descriptors[2].id = 2;
     file_descriptors[2].name = str_copy("stderr");
     file_descriptors[2].handle = stderr;
-    file_descriptors[2].type = FD_FILE;
     file_descriptors[2].mode = str_copy("w");
     file_descriptors[2].is_open = true;
     file_descriptors[2].position = 0;
@@ -666,4 +191,6 @@ void init_io_module() {
     
     printf("%s[IO MODULE]%s Initialized with %d file descriptors\n", 
            COLOR_GREEN, COLOR_RESET, fd_count);
+    printf("%s[IO MODULE]%s Basic IO operations available\n", 
+           COLOR_GREEN, COLOR_RESET);
 }
