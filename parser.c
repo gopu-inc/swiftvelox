@@ -2089,6 +2089,7 @@ static ASTNode* importStatement() {
     return node;
 }
 
+
 static ASTNode* exportStatement() {
     // 1. Export de liste: export { add, PI as pi }
     if (match(TK_LBRACE)) {
@@ -2136,7 +2137,7 @@ static ASTNode* exportStatement() {
         if (match(TK_FROM)) {
             if (!match(TK_STRING)) {
                 errorAtCurrent("Expected module name after 'from'");
-                return NULL;
+                return export_list; // Retourner ce qu'on a déjà
             }
             // Stocker le module source
             export_list->data.imports.from_module = str_copy(previous.value.str_val);
@@ -2194,12 +2195,35 @@ static ASTNode* exportStatement() {
         export_node->data.export.alias = alias_name;
         export_node->left = declaration;
         
+        // Consommer le point-virgule
+        if (declaration->type != NODE_FUNC) {
+            // Pour les déclarations de variables, vérifier le ';'
+            if (!check(TK_SEMICOLON)) {
+                // La variable declaration peut déjà avoir consommé le ';'
+                // On vérifie si le prochain token est un ';'
+                if (match(TK_SEMICOLON)) {
+                    // OK
+                }
+            }
+        }
+        
         return export_node;
     }
+    
+    // 3. Si on arrive ici, c'est une erreur de syntaxe
+    errorAtCurrent("Expected export list or declaration after 'export'");
+    return NULL;
+}
+
+// ======================================================
+// [SECTION] SPECIAL DECLARATIONS
+// ======================================================
 // ======================================================
 // [SECTION] SPECIAL DECLARATIONS
 // ======================================================
 static ASTNode* mainDeclaration() {
+    ASTNode* node = newNode(NODE_MAIN);
+    
     consume(TK_LPAREN, "Expected '(' after main");
     
     // Parse parameters (usually empty for main)
@@ -2212,17 +2236,17 @@ static ASTNode* mainDeclaration() {
     
     consume(TK_LBRACE, "Expected '{' before main body");
     
-    ASTNode* node = newNode(NODE_MAIN);
     node->left = block();
     
     printf("%s[PARSER]%s Main function parsed\n", COLOR_BLUE, COLOR_RESET);
     
     return node;
-  }
+}
 
 static ASTNode* dbvarStatement() {
+    ASTNode* node = newNode(NODE_DBVAR);
     consume(TK_SEMICOLON, "Expected ';' after dbvar");
-    return newNode(NODE_DBVAR);
+    return node;
 }
 
 // ======================================================
