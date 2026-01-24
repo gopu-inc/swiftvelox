@@ -1338,7 +1338,7 @@ static ASTNode* block() {
 // ======================================================
 static ASTNode* functionDeclaration(bool is_exported) {
     Token func_token = previous;
-    // SUPPORT IO
+    /* SUPPORT IO
     if (match(TK_IO_OPEN)) return ioOpenStatement();
     if (match(TK_IO_CLOSE)) return ioCloseStatement();
     if (match(TK_IO_READ)) return ioReadStatement();
@@ -1346,7 +1346,7 @@ static ASTNode* functionDeclaration(bool is_exported) {
     if (!match(TK_IDENT)) {
         errorAtCurrent("Expected function name after 'func'");
         return NULL;
-    }
+    } */
     
     char* func_name = str_copy(previous.value.str_val);
     
