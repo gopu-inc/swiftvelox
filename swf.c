@@ -67,6 +67,31 @@ typedef struct {
 static Variable vars[1000];
 static int var_count = 0;
 static int scope_level = 0;
+// ======================================================
+// [SECTION] EXPORT SYSTEM
+// ======================================================
+typedef struct {
+    char* symbol;
+    char* alias;
+    int scope_level;
+    char* module;
+} ExportEntry;
+
+static ExportEntry exports[100];
+static int export_count = 0;
+
+static void registerExport(const char* symbol, const char* alias) {
+    if (export_count < 100) {
+        exports[export_count].symbol = str_copy(symbol);
+        exports[export_count].alias = str_copy(alias);
+        exports[export_count].scope_level = scope_level;
+        exports[export_count].module = str_copy(current_working_dir);
+        export_count++;
+        
+        printf("%s[EXPORT]%s Registered export: %s as %s\n", 
+               COLOR_GREEN, COLOR_RESET, symbol, alias);
+    }
+}
 
 // ======================================================
 // [SECTION] FUNCTION SYSTEM
@@ -336,7 +361,6 @@ static char* resolveImportPath(const char* import_path, const char* from_package
     free(resolved);
     return NULL;
 }
-
 static bool loadAndExecuteModule(const char* import_path, const char* from_package) {
     char* full_path = resolveImportPath(import_path, from_package);
     if (!full_path) {
@@ -392,24 +416,45 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_packa
     ASTNode** nodes = parse(source, &count);
     
     if (nodes) {
+        // Première passe : enregistrer les fonctions et exports
         for (int i = 0; i < count; i++) {
-            if (nodes[i] && nodes[i]->type == NODE_FUNC) {
-                int param_count = 0;
-                ASTNode* param = nodes[i]->left;
-                while (param) {
-                    param_count++;
-                    param = param->right;
+            if (nodes[i]) {
+                if (nodes[i]->type == NODE_FUNC) {
+                    int param_count = 0;
+                    ASTNode* param = nodes[i]->left;
+                    while (param) {
+                        param_count++;
+                        param = param->right;
+                    }
+                    registerFunction(nodes[i]->data.name, nodes[i]->left, nodes[i]->right, param_count);
                 }
-                registerFunction(nodes[i]->data.name, nodes[i]->left, nodes[i]->right, param_count);
+                else if (nodes[i]->type == NODE_EXPORT) {
+                    execute(nodes[i]); // Enregistrer l'export
+                }
+                else if (nodes[i]->type == NODE_VAR_DECL || 
+                        nodes[i]->type == NODE_CONST_DECL ||
+                        nodes[i]->type == NODE_NET_DECL ||
+                        nodes[i]->type == NODE_CLOG_DECL ||
+                        nodes[i]->type == NODE_DOS_DECL ||
+                        nodes[i]->type == NODE_SEL_DECL) {
+                    // Exécuter les déclarations de variables pour les exporter
+                    execute(nodes[i]);
+                }
             }
         }
         
+        // Deuxième passe : exécuter le reste (sauf main)
         for (int i = 0; i < count; i++) {
-            if (nodes[i] && nodes[i]->type != NODE_FUNC && nodes[i]->type != NODE_MAIN) {
+            if (nodes[i] && nodes[i]->type != NODE_FUNC && 
+                nodes[i]->type != NODE_EXPORT &&
+                nodes[i]->type != NODE_MAIN &&
+                nodes[i]->type != NODE_VAR_DECL &&
+                nodes[i]->type != NODE_CONST_DECL) {
                 execute(nodes[i]);
             }
         }
         
+        // Libération mémoire
         for (int i = 0; i < count; i++) {
             if (nodes[i]) {
                 if (nodes[i]->type == NODE_STRING && nodes[i]->data.str_val) {
@@ -429,6 +474,19 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_packa
     free(source);
     free(full_path);
     return true;
+}
+static bool isSymbolExported(const char* symbol, const char* module_path) {
+    for (int i = 0; i < export_count; i++) {
+        if (strcmp(exports[i].symbol, symbol) == 0 &&
+            strcmp(exports[i].module, module_path) == 0) {
+            return true;
+        }
+        if (exports[i].alias && strcmp(exports[i].alias, symbol) == 0 &&
+            strcmp(exports[i].module, module_path) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // ======================================================
@@ -1025,6 +1083,11 @@ static void execute(ASTNode* node) {
     if (!node) return;
     
     switch (node->type) {
+        case NODE_EXPORT:
+            registerExport(node->data.export.symbol, 
+                   node->data.export.alias);
+            break;
+        
         case NODE_VAR_DECL:
         case NODE_NET_DECL:
         case NODE_CLOG_DECL:
