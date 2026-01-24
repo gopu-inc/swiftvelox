@@ -1032,11 +1032,77 @@ static ASTNode* ioListdirStatement() {
     consume(TK_LPAREN, "Expected '(' after io.listdir");
     node->left = expression(); // path
     
+    // Optionnel : deuxième paramètre pour les options
+    if (match(TK_COMMA)) {
+        node->right = expression(); // options (-a, -l, etc.)
+    }
+    
     consume(TK_RPAREN, "Expected ')' after io.listdir arguments");
     consume(TK_SEMICOLON, "Expected ';' after io.listdir");
     
     return node;
 }
+static ASTNode* ioFlushStatement() {
+    ASTNode* node = newNode(NODE_FILE_FLUSH);
+    
+    consume(TK_LPAREN, "Expected '(' after io.flush");
+    node->left = expression(); // fd
+    
+    consume(TK_RPAREN, "Expected ')' after io.flush arguments");
+    consume(TK_SEMICOLON, "Expected ';' after io.flush");
+    
+    return node;
+}
+static ASTNode* ioCopyStatement() {
+    ASTNode* node = newNode(NODE_FILE_COPY);
+    
+    consume(TK_LPAREN, "Expected '(' after io.copy");
+    node->left = expression(); // source
+    consume(TK_COMMA, "Expected ',' after source");
+    node->right = expression(); // destination
+    
+    consume(TK_RPAREN, "Expected ')' after io.copy arguments");
+    consume(TK_SEMICOLON, "Expected ';' after io.copy");
+    
+    return node;
+}
+static ASTNode* ioRemoveStatement() {
+    ASTNode* node = newNode(NODE_FILE_REMOVE);
+    
+    consume(TK_LPAREN, "Expected '(' after io.remove");
+    node->left = expression(); // filename
+    
+    consume(TK_RPAREN, "Expected ')' after io.remove arguments");
+    consume(TK_SEMICOLON, "Expected ';' after io.remove");
+    
+    return node;
+}
+static ASTNode* ioRenameStatement() {
+    ASTNode* node = newNode(NODE_FILE_RENAME);
+    
+    consume(TK_LPAREN, "Expected '(' after io.rename");
+    node->left = expression(); // old name
+    consume(TK_COMMA, "Expected ',' after old name");
+    node->right = expression(); // new name
+    
+    consume(TK_RPAREN, "Expected ')' after io.rename arguments");
+    consume(TK_SEMICOLON, "Expected ';' after io.rename");
+    
+    return node;
+}
+static ASTNode* ioRmdirStatement() {
+    ASTNode* node = newNode(NODE_DIR_REMOVE);
+    
+    consume(TK_LPAREN, "Expected '(' after io.rmdir");
+    node->left = expression(); // dirname
+    
+    consume(TK_RPAREN, "Expected ')' after io.rmdir arguments");
+    consume(TK_SEMICOLON, "Expected ';' after io.rmdir");
+    
+    return node;
+}
+
+
 
 
 
@@ -2105,17 +2171,23 @@ static ASTNode* statement() {
         return printStatement();
     }
     // Après les autres match() statements
+    static ASTNode* statement() {
     if (match(TK_IO_OPEN)) return ioOpenStatement();
     if (match(TK_IO_CLOSE)) return ioCloseStatement();
     if (match(TK_IO_READ)) return ioReadStatement();
     if (match(TK_IO_WRITE)) return ioWriteStatement();
     if (match(TK_IO_SEEK)) return ioSeekStatement();
     if (match(TK_IO_TELL)) return ioTellStatement();
+    if (match(TK_IO_FLUSH)) return ioFlushStatement();
     if (match(TK_IO_EXISTS)) return ioExistsStatement();
     if (match(TK_IO_ISFILE)) return ioIsfileStatement();
     if (match(TK_IO_ISDIR)) return ioIsdirStatement();
     if (match(TK_IO_MKDIR)) return ioMkdirStatement();
+    if (match(TK_IO_RMDIR)) return ioRmdirStatement();
     if (match(TK_IO_LISTDIR)) return ioListdirStatement();
+    if (match(TK_IO_REMOVE)) return ioRemoveStatement();
+    if (match(TK_IO_RENAME)) return ioRenameStatement();
+    if (match(TK_IO_COPY)) return ioCopyStatement();
     if (match(TK_WELD)) return weldStatement();
     if (match(TK_READ)) return readStatement();
     if (match(TK_WRITE)) return writeStatement();
