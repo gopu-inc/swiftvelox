@@ -5,6 +5,12 @@
 
 // Définition de tous les types de tokens (TokenKind)
 typedef enum {
+   // Ajoute dans TokenKind :
+    TK_IO_OPEN, TK_IO_CLOSE, TK_IO_READ, TK_IO_WRITE,
+    TK_IO_SEEK, TK_IO_TELL, TK_IO_FLUSH,
+    TK_IO_EXISTS, TK_IO_ISFILE, TK_IO_ISDIR,
+    TK_IO_MKDIR, TK_IO_RMDIR, TK_IO_LISTDIR,
+    TK_IO_REMOVE, TK_IO_RENAME, TK_IO_COPY,
     // Littéraux
     TK_INT_LIT, TK_FLOAT_LIT, TK_CHAR_LIT, TK_STR_LIT, TK_TRUE, TK_FALSE,
     // Opérateurs
