@@ -1,4 +1,4 @@
-// io.c - Module IO complet pour SwiftFlow
+// io.c - Module IO autonome pour SwiftFlow
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,7 +31,7 @@ static int fd_count = 0;
 // [SECTION] FONCTIONS UTILITAIRES
 // ======================================================
 static int allocate_fd() {
-    for (int i = 3; i < 256; i++) { // Commencer à 3 (0,1,2 sont réservés)
+    for (int i = 3; i < 256; i++) {
         if (!file_descriptors[i].is_open) {
             file_descriptors[i].id = i;
             file_descriptors[i].is_open = true;
@@ -62,37 +62,61 @@ static void close_fd(int fd) {
     }
 }
 
-// Déclarations des fonctions d'évaluation depuis swf.c
-extern char* evalString(ASTNode* node);
-extern double evalFloat(ASTNode* node);
-extern bool evalBool(ASTNode* node);
-
-// Fonction utilitaire pour stocker une valeur dans une variable
-static void store_in_variable(const char* var_name, int64_t value) {
-    // Cette fonction sera implémentée plus tard
-    printf("%s[IO]%s Would store value %lld in variable '%s'\n", 
-           COLOR_GREEN, COLOR_RESET, value, var_name ? var_name : "unknown");
+// Fonctions simplifiées pour extraire les valeurs des nœuds AST
+static char* extract_string(ASTNode* node) {
+    if (!node) return NULL;
+    
+    if (node->type == NODE_STRING) {
+        return str_copy(node->data.str_val);
+    }
+    
+    if (node->type == NODE_IDENT && node->data.name) {
+        return str_copy(node->data.name);
+    }
+    
+    // Pour les autres types, retourner une représentation par défaut
+    char* result = malloc(32);
+    if (result) {
+        if (node->type == NODE_INT) {
+            snprintf(result, 32, "%lld", node->data.int_val);
+        } else if (node->type == NODE_FLOAT) {
+            snprintf(result, 32, "%g", node->data.float_val);
+        } else if (node->type == NODE_BOOL) {
+            strcpy(result, node->data.bool_val ? "true" : "false");
+        } else {
+            strcpy(result, "");
+        }
+    }
+    return result;
 }
 
-static void store_string_in_variable(const char* var_name, const char* value) {
-    printf("%s[IO]%s Would store string '%s' in variable '%s'\n", 
-           COLOR_GREEN, COLOR_RESET, value, var_name ? var_name : "unknown");
+static double extract_number(ASTNode* node) {
+    if (!node) return 0.0;
+    
+    if (node->type == NODE_INT) {
+        return (double)node->data.int_val;
+    }
+    
+    if (node->type == NODE_FLOAT) {
+        return node->data.float_val;
+    }
+    
+    if (node->type == NODE_BOOL) {
+        return node->data.bool_val ? 1.0 : 0.0;
+    }
+    
+    return 0.0;
 }
 
 // ======================================================
-// [SECTION] FONCTIONS D'EXÉCUTION IO COMPLÈTES
+// [SECTION] FONCTIONS D'EXÉCUTION IO
 // ======================================================
 void io_open(ASTNode* node) {
     if (!node) return;
     
-    // Évaluer les arguments
-    char* filename = NULL;
-    char* mode = NULL;
-    char* var_name = NULL;
-    
-    if (node->left) filename = evalString(node->left);
-    if (node->right) mode = evalString(node->right);
-    if (node->third) var_name = evalString(node->third);
+    char* filename = extract_string(node->left);
+    char* mode = extract_string(node->right);
+    char* var_name = node->third ? extract_string(node->third) : NULL;
     
     if (!filename || !mode) {
         printf("%s[IO ERROR]%s Missing filename or mode\n", COLOR_RED, COLOR_RESET);
@@ -103,8 +127,9 @@ void io_open(ASTNode* node) {
     }
     
     // Valider le mode
+    const char* valid_modes[] = {"r", "w", "a", "r+", "w+", "a+", 
+                                "rb", "wb", "ab", "r+b", "w+b", "a+b", NULL};
     bool valid_mode = false;
-    const char* valid_modes[] = {"r", "w", "a", "r+", "w+", "a+", "rb", "wb", "ab", "r+b", "w+b", "a+b", NULL};
     
     for (int i = 0; valid_modes[i]; i++) {
         if (strcmp(mode, valid_modes[i]) == 0) {
@@ -132,7 +157,6 @@ void io_open(ASTNode* node) {
         return;
     }
     
-    // Allouer un descripteur
     int fd = allocate_fd();
     if (fd == -1) {
         printf("%s[IO ERROR]%s Too many open files\n", COLOR_RED, COLOR_RESET);
@@ -149,19 +173,19 @@ void io_open(ASTNode* node) {
     desc->mode = str_copy(mode);
     desc->is_open = true;
     
-    // Obtenir la taille du fichier
+    // Obtenir la taille
     fseek(f, 0, SEEK_END);
     desc->size = ftell(f);
     fseek(f, 0, SEEK_SET);
     desc->position = 0;
     
-    // Stocker le fd si demandé
-    if (var_name) {
-        store_in_variable(var_name, fd);
-    }
-    
     printf("%s[IO]%s File opened: %s (fd=%d, mode=%s, size=%ld)\n", 
            COLOR_GREEN, COLOR_RESET, filename, fd, mode, desc->size);
+    
+    if (var_name) {
+        printf("%s[IO INFO]%s File descriptor %d would be stored in variable '%s'\n",
+               COLOR_CYAN, COLOR_RESET, fd, var_name);
+    }
     
     free(filename);
     free(mode);
@@ -174,7 +198,7 @@ void io_close(ASTNode* node) {
         return;
     }
     
-    double fd_val = evalFloat(node->left);
+    double fd_val = extract_number(node->left);
     int fd = (int)fd_val;
     
     FileDescriptor* desc = get_fd(fd);
@@ -200,7 +224,7 @@ void io_read(ASTNode* node) {
         return;
     }
     
-    double fd_val = evalFloat(node->left);
+    double fd_val = extract_number(node->left);
     int fd = (int)fd_val;
     
     FileDescriptor* desc = get_fd(fd);
@@ -214,16 +238,16 @@ void io_read(ASTNode* node) {
         return;
     }
     
-    // Vérifier si on peut lire
+    // Vérifier les permissions
     if (strchr(desc->mode, 'r') == NULL && strchr(desc->mode, '+') == NULL) {
         printf("%s[IO ERROR]%s File not opened for reading: %s\n", 
                COLOR_RED, COLOR_RESET, desc->mode);
         return;
     }
     
-    size_t size = 1024; // Taille par défaut
+    size_t size = 1024;
     if (node->right) {
-        size_t temp_size = (size_t)evalFloat(node->right);
+        size_t temp_size = (size_t)extract_number(node->right);
         if (temp_size > 0 && temp_size <= 65536) {
             size = temp_size;
         }
@@ -241,20 +265,19 @@ void io_read(ASTNode* node) {
     desc->position = ftell(desc->handle);
     
     // Variable pour résultat
-    char* var_name = NULL;
-    if (node->third) {
-        var_name = evalString(node->third);
-    }
+    char* var_name = node->third ? extract_string(node->third) : NULL;
     
     if (var_name) {
-        store_string_in_variable(var_name, buffer);
+        printf("%s[IO]%s Read %zu bytes from fd=%d (would store in '%s')\n", 
+               COLOR_GREEN, COLOR_RESET, bytes_read, fd, var_name);
         free(var_name);
     } else {
+        printf("%s[IO]%s Read %zu bytes from fd=%d:\n", 
+               COLOR_GREEN, COLOR_RESET, bytes_read, fd);
+        printf("--- BEGIN CONTENT ---\n");
         printf("%s", buffer);
+        printf("\n--- END CONTENT ---\n");
     }
-    
-    printf("%s[IO]%s Read %zu bytes from fd=%d\n", 
-           COLOR_GREEN, COLOR_RESET, bytes_read, fd);
     
     free(buffer);
 }
@@ -265,7 +288,7 @@ void io_write(ASTNode* node) {
         return;
     }
     
-    double fd_val = evalFloat(node->left);
+    double fd_val = extract_number(node->left);
     int fd = (int)fd_val;
     
     FileDescriptor* desc = get_fd(fd);
@@ -279,7 +302,7 @@ void io_write(ASTNode* node) {
         return;
     }
     
-    // Vérifier si on peut écrire
+    // Vérifier les permissions
     if (strchr(desc->mode, 'w') == NULL && strchr(desc->mode, 'a') == NULL && 
         strchr(desc->mode, '+') == NULL) {
         printf("%s[IO ERROR]%s File not opened for writing: %s\n", 
@@ -287,7 +310,7 @@ void io_write(ASTNode* node) {
         return;
     }
     
-    char* data = evalString(node->right);
+    char* data = extract_string(node->right);
     if (!data) {
         return;
     }
@@ -312,7 +335,7 @@ void io_seek(ASTNode* node) {
         return;
     }
     
-    double fd_val = evalFloat(node->left);
+    double fd_val = extract_number(node->left);
     int fd = (int)fd_val;
     
     FileDescriptor* desc = get_fd(fd);
@@ -326,9 +349,9 @@ void io_seek(ASTNode* node) {
         return;
     }
     
-    int whence = SEEK_SET; // Par défaut
+    int whence = SEEK_SET;
     if (node->third) {
-        char* whence_str = evalString(node->third);
+        char* whence_str = extract_string(node->third);
         if (whence_str) {
             if (strcmp(whence_str, "cur") == 0 || strcmp(whence_str, "current") == 0) {
                 whence = SEEK_CUR;
@@ -341,7 +364,7 @@ void io_seek(ASTNode* node) {
         }
     }
     
-    long offset = (long)evalFloat(node->right);
+    long offset = (long)extract_number(node->right);
     
     if (fseek(desc->handle, offset, whence) != 0) {
         printf("%s[IO ERROR]%s Seek failed: %s\n", COLOR_RED, COLOR_RESET, strerror(errno));
@@ -360,7 +383,7 @@ void io_tell(ASTNode* node) {
         return;
     }
     
-    double fd_val = evalFloat(node->left);
+    double fd_val = extract_number(node->left);
     int fd = (int)fd_val;
     
     FileDescriptor* desc = get_fd(fd);
@@ -378,13 +401,11 @@ void io_tell(ASTNode* node) {
     desc->position = pos;
     
     // Variable pour résultat
-    char* var_name = NULL;
-    if (node->right) {
-        var_name = evalString(node->right);
-    }
+    char* var_name = node->right ? extract_string(node->right) : NULL;
     
     if (var_name) {
-        store_in_variable(var_name, pos);
+        printf("%s[IO]%s Current position of fd=%d is %ld (would store in '%s')\n",
+               COLOR_GREEN, COLOR_RESET, fd, pos, var_name);
         free(var_name);
     } else {
         printf("Position: %ld\n", pos);
@@ -397,19 +418,17 @@ void io_exists(ASTNode* node) {
         return;
     }
     
-    char* path = evalString(node->left);
+    char* path = extract_string(node->left);
     if (!path) return;
     
     bool exists = (access(path, F_OK) == 0);
     
     // Variable pour résultat
-    char* var_name = NULL;
-    if (node->right) {
-        var_name = evalString(node->right);
-    }
+    char* var_name = node->right ? extract_string(node->right) : NULL;
     
     if (var_name) {
-        store_in_variable(var_name, exists ? 1 : 0);
+        printf("%s[IO]%s Path '%s' exists: %s (would store in '%s')\n",
+               COLOR_GREEN, COLOR_RESET, path, exists ? "yes" : "no", var_name);
         free(var_name);
     } else {
         printf("%s exists: %s\n", path, exists ? "yes" : "no");
@@ -424,20 +443,18 @@ void io_isfile(ASTNode* node) {
         return;
     }
     
-    char* path = evalString(node->left);
+    char* path = extract_string(node->left);
     if (!path) return;
     
     struct stat st;
     bool is_file = (stat(path, &st) == 0 && S_ISREG(st.st_mode));
     
     // Variable pour résultat
-    char* var_name = NULL;
-    if (node->right) {
-        var_name = evalString(node->right);
-    }
+    char* var_name = node->right ? extract_string(node->right) : NULL;
     
     if (var_name) {
-        store_in_variable(var_name, is_file ? 1 : 0);
+        printf("%s[IO]%s Path '%s' is a file: %s\n",
+               COLOR_GREEN, COLOR_RESET, path, is_file ? "yes" : "no");
         free(var_name);
     }
     
@@ -450,20 +467,18 @@ void io_isdir(ASTNode* node) {
         return;
     }
     
-    char* path = evalString(node->left);
+    char* path = extract_string(node->left);
     if (!path) return;
     
     struct stat st;
     bool is_dir = (stat(path, &st) == 0 && S_ISDIR(st.st_mode));
     
     // Variable pour résultat
-    char* var_name = NULL;
-    if (node->right) {
-        var_name = evalString(node->right);
-    }
+    char* var_name = node->right ? extract_string(node->right) : NULL;
     
     if (var_name) {
-        store_in_variable(var_name, is_dir ? 1 : 0);
+        printf("%s[IO]%s Path '%s' is a directory: %s\n",
+               COLOR_GREEN, COLOR_RESET, path, is_dir ? "yes" : "no");
         free(var_name);
     }
     
@@ -476,12 +491,12 @@ void io_mkdir(ASTNode* node) {
         return;
     }
     
-    char* dirname_str = evalString(node->left);
+    char* dirname_str = extract_string(node->left);
     if (!dirname_str) return;
     
-    int mode = 0755; // Mode par défaut
+    int mode = 0755;
     if (node->right) {
-        mode = (int)evalFloat(node->right);
+        mode = (int)extract_number(node->right);
     }
     
     if (mkdir(dirname_str, mode) != 0) {
@@ -500,7 +515,7 @@ void io_listdir(ASTNode* node) {
         return;
     }
     
-    char* path = evalString(node->left);
+    char* path = extract_string(node->left);
     if (!path) return;
     
     DIR* dir = opendir(path);
@@ -516,8 +531,11 @@ void io_listdir(ASTNode* node) {
     
     struct dirent* entry;
     int count = 0;
+    int dir_count = 0;
+    int file_count = 0;
+    long long total_size = 0;
+    
     while ((entry = readdir(dir)) != NULL) {
-        // Ignorer . et ..
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
@@ -533,27 +551,32 @@ void io_listdir(ASTNode* node) {
         if (stat(fullpath, &st) == 0) {
             if (S_ISREG(st.st_mode)) {
                 type = "F";
+                file_count++;
+                total_size += st.st_size;
+                
                 if (st.st_size < 1024)
-                    snprintf(size_str, sizeof(size_str), "%ld B", st.st_size);
+                    snprintf(size_str, sizeof(size_str), "%lld B", (long long)st.st_size);
                 else if (st.st_size < 1024*1024)
                     snprintf(size_str, sizeof(size_str), "%.1f KB", st.st_size/1024.0);
                 else
                     snprintf(size_str, sizeof(size_str), "%.1f MB", st.st_size/(1024.0*1024.0));
             }
-            else if (S_ISDIR(st.st_mode)) type = "D";
+            else if (S_ISDIR(st.st_mode)) {
+                type = "D";
+                dir_count++;
+            }
             else if (S_ISLNK(st.st_mode)) type = "L";
             
-            // Format time
             struct tm* tm_info = localtime(&st.st_mtime);
             strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M", tm_info);
         }
         
         if (S_ISDIR(st.st_mode)) {
-            printf("  \033[1;34m[%s]\033[0m \033[1;34m%s/\033[0m\n", type, entry->d_name);
+            printf("  \033[1;34m[%s]\033[0m \033[1;34m%s/\033[0m %s\n", 
+                   type, entry->d_name, time_str);
         } else if (S_ISREG(st.st_mode)) {
-            printf("  [%s] %s", type, entry->d_name);
-            if (size_str[0]) printf(" (%s)", size_str);
-            printf("\n");
+            printf("  [%s] %-30s %10s  %s\n", 
+                   type, entry->d_name, size_str, time_str);
         } else {
             printf("  [%s] %s\n", type, entry->d_name);
         }
@@ -561,11 +584,17 @@ void io_listdir(ASTNode* node) {
         count++;
     }
     
-    printf("========================\n");
-    printf("Total: %d items\n", count);
-    
     closedir(dir);
     free(path);
+    
+    printf("========================\n");
+    printf("Total: %d items (%d directories, %d files, %s)\n", 
+           count, dir_count, file_count, 
+           total_size < 1024 ? 
+           (total_size == 0 ? "0 B" : "<1 KB") :
+           total_size < 1024*1024 ?
+           (total_size/1024 == 0 ? "<1 KB" : ">1 KB") :
+           ">1 MB");
 }
 
 // ======================================================
