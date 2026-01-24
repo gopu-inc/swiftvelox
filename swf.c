@@ -18,7 +18,20 @@
 #include "common.h"
 
 extern ASTNode** parse(const char* source, int* count);
+// Dans swf.c, après les autres déclarations de fonction (environ ligne 70-80):
 
+// Fonctions IO
+void io_open(ASTNode* node);
+void io_close(ASTNode* node);
+void io_read(ASTNode* node);
+void io_write(ASTNode* node);
+void io_seek(ASTNode* node);
+void io_tell(ASTNode* node);
+void io_exists(ASTNode* node);
+void io_isfile(ASTNode* node);
+void io_isdir(ASTNode* node);
+void io_mkdir(ASTNode* node);
+void io_listdir(ASTNode* node);
 // ======================================================
 // [SECTION] VERSION INFORMATION
 // ======================================================
@@ -1071,7 +1084,52 @@ static void execute(ASTNode* node) {
             }
             break;
         }
-            
+        // Dans swf.c, dans la fonction execute(), après le case NODE_APPEND:
+// (environ ligne 950-1000)
+
+case NODE_FILE_OPEN:
+    io_open(node);
+    break;
+    
+case NODE_FILE_CLOSE:
+    io_close(node);
+    break;
+    
+case NODE_FILE_READ:
+    io_read(node);
+    break;
+    
+case NODE_FILE_WRITE:
+    io_write(node);
+    break;
+    
+case NODE_FILE_SEEK:
+    io_seek(node);
+    break;
+    
+case NODE_FILE_TELL:
+    io_tell(node);
+    break;
+    
+case NODE_PATH_EXISTS:
+    io_exists(node);
+    break;
+    
+case NODE_PATH_ISFILE:
+    io_isfile(node);
+    break;
+    
+case NODE_PATH_ISDIR:
+    io_isdir(node);
+    break;
+    
+case NODE_DIR_CREATE:
+    io_mkdir(node);
+    break;
+    
+case NODE_DIR_LIST:
+    io_listdir(node);
+    break;    
         case NODE_ASSIGN: {
             if (node->data.name) {
                 int idx = findVar(node->data.name);
