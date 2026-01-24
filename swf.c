@@ -1236,15 +1236,15 @@ static void execute(ASTNode* node) {
         }
             
         case NODE_DBVAR: {
-            printf("\n%s╔════════════════════════════════════════════════════════════════╗%s\n", 
+            printf("\n%s╔═════════════════════════════════════════════════╗%s\n", 
                    COLOR_CYAN, COLOR_RESET);
-            printf("%s║                   VARIABLE TABLE (dbvar)                       ║%s\n", 
+            printf("%s║                   VARIABLE TABLE (dbvar)          ║%s\n", 
                    COLOR_CYAN, COLOR_RESET);
-            printf("%s╠════════════════════════════════════════════════════════════════╣%s\n", 
+            printf("%s╠═══════════════════════════════════════════════════╣%s\n", 
                    COLOR_CYAN, COLOR_RESET);
-            printf("%s║  Type    │ Name        │ Size     │ Value       │ Initialized ║%s\n", 
+            printf("%s║  Type    │ Name     │ Size │ Value  │ Initialized ║%s\n", 
                    COLOR_CYAN, COLOR_RESET);
-            printf("%s╠════════════════════════════════════════════════════════════════╣%s\n", 
+            printf("%s╠═══════════════════════════════════════════════════╣%s\n", 
                    COLOR_CYAN, COLOR_RESET);
             
             for (int i = 0; i < var_count; i++) {
@@ -1274,7 +1274,7 @@ static void execute(ASTNode* node) {
                        COLOR_CYAN, COLOR_RESET);
             }
             
-            printf("%s╚════════════════════════════════════════════════════════════════╝%s\n", 
+            printf("   %s╚════════════════════════════════════════════════════════════════╝%s\n", 
                    COLOR_CYAN, COLOR_RESET);
             break;
         }
@@ -1421,7 +1421,7 @@ static void run(const char* source, const char* filename) {
     }
     class_count = 0;
 }
-
+init_io_module();
 // ======================================================
 // [SECTION] REPL
 // ======================================================
