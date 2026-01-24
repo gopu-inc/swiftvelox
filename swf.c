@@ -161,8 +161,8 @@ static char* evalString(ASTNode* node);
 static bool evalBool(ASTNode* node);
 static char* weldInput(const char* prompt);
 static void initWorkingDir(const char* filename);
-static char* resolveImportPath(const char* import_path, const char* from_package);
-static bool loadAndExecuteModule(const char* import_path, const char* from_package);
+static char* resolveImportPath(const char* import_path, const char* from_module);
+static bool loadAndExecuteModule(const char* import_path, const char* from_module, bool import_named, char** named_symbols, int symbol_count);
 static void showVersion();
 static void showHelp();
 static void executeRead(ASTNode* node);
@@ -392,8 +392,7 @@ static char* resolveModulePath(const char* import_path, const char* from_module)
     return NULL;
 }
 
-static bool loadAndExecuteModule(const char* import_path, const char* from_module, 
-                                bool import_named, char** named_symbols, int symbol_count) {
+static bool loadAndExecuteModule(const char* import_path, const char* from_module, bool import_named, char** named_symbols, int symbol_count) {
     char* full_path = resolveModulePath(import_path, from_module);
     if (!full_path) {
         printf("%s[IMPORT ERROR]%s Module not found: %s\n", 
@@ -1467,17 +1466,58 @@ case NODE_DIR_LIST:
         }
             
         case NODE_IMPORT: {
-            for (int i = 0; i < node->data.imports.module_count; i++) {
-                char* module_name = node->data.imports.modules[i];
-                char* package_name = node->data.imports.from_module;
+    if (node->data.imports.module_count > 0) {
+        for (int i = 0; i < node->data.imports.module_count; i++) {
+            char* module_name = node->data.imports.modules[i];
+            char* from_module = node->data.imports.from_module;
+            
+            // Si c'est un import nommé (import {add, PI} from "math")
+            if (node->left) {
+                // Compter combien de symboles sont demandés
+                int symbol_count = 0;
+                ASTNode* symbol_node = node->left;
+                while (symbol_node) {
+                    symbol_count++;
+                    symbol_node = symbol_node->right;
+                }
                 
-                if (!loadAndExecuteModule(module_name, package_name)) {
+                // Créer un tableau des noms de symboles
+                char** named_symbols = malloc(symbol_count * sizeof(char*));
+                symbol_node = node->left;
+                int idx = 0;
+                while (symbol_node && idx < symbol_count) {
+                    if (symbol_node->type == NODE_IDENT && symbol_node->data.name) {
+                        named_symbols[idx] = str_copy(symbol_node->data.name);
+                    } else {
+                        named_symbols[idx] = NULL;
+                    }
+                    symbol_node = symbol_node->right;
+                    idx++;
+                }
+                
+                // Importer avec les symboles nommés
+                if (!loadAndExecuteModule(module_name, from_module, true, named_symbols, symbol_count)) {
+                    printf("%s[IMPORT ERROR]%s Failed to import named symbols from: %s\n", 
+                           COLOR_RED, COLOR_RESET, module_name);
+                }
+                
+                // Nettoyer
+                for (int j = 0; j < symbol_count; j++) {
+                    if (named_symbols[j]) free(named_symbols[j]);
+                }
+                free(named_symbols);
+            } 
+            // Import simple (import "math")
+            else {
+                if (!loadAndExecuteModule(module_name, from_module, false, NULL, 0)) {
                     printf("%s[IMPORT ERROR]%s Failed to import: %s\n", 
                            COLOR_RED, COLOR_RESET, module_name);
                 }
             }
-            break;
         }
+    }
+    break;
+}
             
         case NODE_FUNC:
             // Function declarations are already registered during parsing
