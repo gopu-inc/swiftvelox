@@ -817,6 +817,7 @@ static ASTNode* primary() {
 // ======================================================
 // [SECTION] STATEMENT PARSING - COMPLETE
 // ======================================================
+
 static ASTNode* statement();
 static ASTNode* declaration();
 static ASTNode* block();
@@ -2217,7 +2218,7 @@ static ASTNode* mainDeclaration() {
     printf("%s[PARSER]%s Main function parsed\n", COLOR_BLUE, COLOR_RESET);
     
     return node;
-}
+  }
 
 static ASTNode* dbvarStatement() {
     consume(TK_SEMICOLON, "Expected ';' after dbvar");
