@@ -2170,8 +2170,6 @@ static ASTNode* statement() {
         warningAt(previous, "printdb not implemented, using print");
         return printStatement();
     }
-    // Après les autres match() statements
-    static ASTNode* statement() {
     if (match(TK_IO_OPEN)) return ioOpenStatement();
     if (match(TK_IO_CLOSE)) return ioCloseStatement();
     if (match(TK_IO_READ)) return ioReadStatement();
