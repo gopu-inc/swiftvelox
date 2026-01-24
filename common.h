@@ -468,29 +468,7 @@ typedef struct ASTNode {
     int column;
     TokenKind op_type;
 } ASTNode;
-// ======================================================
-// [SECTION] IO MODULE PROTOTYPES
-// ======================================================
-#ifdef __cplusplus
-extern "C" {
-#endif
 
-void init_io_module(void);
-void io_open(ASTNode* node);
-void io_close(ASTNode* node);
-void io_read(ASTNode* node);
-void io_write(ASTNode* node);
-void io_seek(ASTNode* node);
-void io_tell(ASTNode* node);
-void io_exists(ASTNode* node);
-void io_isfile(ASTNode* node);
-void io_isdir(ASTNode* node);
-void io_mkdir(ASTNode* node);
-void io_listdir(ASTNode* node);
-
-#ifdef __cplusplus
-}
-#endif
 // ======================================================
 // [SECTION] HELPER FUNCTIONS
 // ======================================================
