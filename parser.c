@@ -1338,7 +1338,11 @@ static ASTNode* block() {
 // ======================================================
 static ASTNode* functionDeclaration(bool is_exported) {
     Token func_token = previous;
-    
+    // SUPPORT IO
+    if (match(TK_IO_OPEN)) return ioOpenStatement();
+    if (match(TK_IO_CLOSE)) return ioCloseStatement();
+    if (match(TK_IO_READ)) return ioReadStatement();
+    if (match(TK_IO_WRITE)) return ioWriteStatement();
     if (!match(TK_IDENT)) {
         errorAtCurrent("Expected function name after 'func'");
         return NULL;
