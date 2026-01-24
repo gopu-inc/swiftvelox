@@ -1797,7 +1797,11 @@ static ASTNode* variableDeclaration() {
         node->left = expression();
     }
     
-    consume(TK_SEMICOLON, "Expected ';' after variable declaration");
+    // Dans un contexte d'export, ne pas consommer ';' immédiatement
+    // L'exportStatement s'occupera de consommer 'as' puis ';'
+    if (!check(TK_AS)) {
+        consume(TK_SEMICOLON, "Expected ';' after variable declaration");
+    }
     
     return node;
 }
