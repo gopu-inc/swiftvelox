@@ -2089,128 +2089,98 @@ static ASTNode* importStatement() {
 }
 
 static ASTNode* exportStatement() {
-    // Accepter différents types de déclarations à exporter
-    ASTNode* export_node = newNode(NODE_EXPORT);
+    // 1. Export de liste: export { add, PI as pi }
+    if (match(TK_LBRACE)) {
+        ASTNode* export_list = newNode(NODE_EXPORT);
+        ASTNode* first_export = NULL;
+        ASTNode* current_export = NULL;
+        
+        do {
+            if (match(TK_IDENT) || match(TK_STRING)) {
+                char* symbol = str_copy(previous.value.str_val);
+                char* alias = str_copy(symbol);
+                
+                if (match(TK_AS)) {
+                    if (!match(TK_IDENT) && !match(TK_STRING)) {
+                        errorAtCurrent("Expected alias name after 'as'");
+                        free(symbol);
+                        free(alias);
+                        break;
+                    }
+                    free(alias);
+                    alias = str_copy(previous.value.str_val);
+                }
+                
+                // Créer un nœud d'export individuel
+                ASTNode* single_export = newNode(NODE_EXPORT);
+                single_export->data.export.symbol = symbol;
+                single_export->data.export.alias = alias;
+                
+                if (!first_export) {
+                    first_export = single_export;
+                    current_export = single_export;
+                } else {
+                    current_export->right = single_export;
+                    current_export = single_export;
+                }
+            } else {
+                errorAtCurrent("Expected symbol name in export list");
+                break;
+            }
+        } while (match(TK_COMMA));
+        
+        consume(TK_RBRACE, "Expected '}' after export list");
+        
+        // Optionnel: 'from' clause
+        if (match(TK_FROM)) {
+            if (!match(TK_STRING)) {
+                errorAtCurrent("Expected module name after 'from'");
+                return NULL;
+            }
+            // Stocker le module source
+            export_list->data.imports.from_module = str_copy(previous.value.str_val);
+        }
+        
+        consume(TK_SEMICOLON, "Expected ';' after export statement");
+        
+        export_list->left = first_export;
+        return export_list;
+    }
     
-    // Préparer pour stocker ce qui est exporté
-    char* symbol_name = NULL;
-    char* alias_name = NULL;
-    
-    // Première possibilité : export d'une déclaration existante
+    // 2. Export de déclaration: export func add() {...}
     if (match(TK_FUNC) || match(TK_VAR) || match(TK_LET) || match(TK_CONST) ||
         match(TK_NET) || match(TK_CLOG) || match(TK_DOS) || match(TK_SEL) ||
         match(TK_CLASS) || match(TK_STRUCT) || match(TK_ENUM)) {
         
-        // Sauvegarder le type de déclaration
         TokenKind decl_type = previous.kind;
-        
-        // Parser la déclaration normalement
         ASTNode* declaration = NULL;
+        char* symbol_name = NULL;
         
         switch (decl_type) {
             case TK_FUNC:
-                declaration = functionDeclaration(true); // true = is_exported
-                if (declaration && declaration->data.name) {
-                    symbol_name = str_copy(declaration->data.name);
-                }
-                break;
-            case TK_VAR:
-            case TK_LET:
-            case TK_CONST:
-            case TK_NET:
-            case TK_CLOG:
-            case TK_DOS:
-            case TK_SEL:
-                declaration = variableDeclaration();
-                if (declaration && declaration->data.name) {
-                    symbol_name = str_copy(declaration->data.name);
-                }
-                break;
-            case TK_CLASS:
-                declaration = classDeclaration();
-                if (declaration && declaration->data.class_def.name) {
-                    symbol_name = str_copy(declaration->data.class_def.name);
-                }
-                break;
-            case TK_STRUCT:
-                declaration = structDeclaration();
-                if (declaration && declaration->data.name) {
-                    symbol_name = str_copy(declaration->data.name);
-                }
-                break;
-            case TK_ENUM:
-                declaration = enumDeclaration();
+                declaration = functionDeclaration(true);
                 if (declaration && declaration->data.name) {
                     symbol_name = str_copy(declaration->data.name);
                 }
                 break;
             default:
-                errorAtCurrent("Unsupported export type");
-                free(export_node);
-                return NULL;
+                declaration = variableDeclaration();
+                if (declaration && declaration->data.name) {
+                    symbol_name = str_copy(declaration->data.name);
+                }
+                break;
         }
         
         if (!declaration) {
-            free(export_node);
             return NULL;
         }
         
-        // Optionnel : alias avec 'as'
+        // Optionnel: alias avec 'as'
+        char* alias_name = NULL;
         if (match(TK_AS)) {
             if (!match(TK_IDENT) && !match(TK_STRING)) {
                 errorAtCurrent("Expected alias name after 'as'");
-                free(export_node);
                 if (symbol_name) free(symbol_name);
-                return NULL;
-            }
-            alias_name = str_copy(previous.value.str_val);
-        } else {
-            // Utiliser le nom original comme alias
-            if (symbol_name) {
-                alias_name = str_copy(symbol_name);
-            }
-        }
-        
-        // Stocker dans le nœud export
-        if (symbol_name) {
-            export_node->data.export.symbol = symbol_name;
-            export_node->data.export.alias = alias_name ? alias_name : str_copy(symbol_name);
-        }
-        
-        // Lier la déclaration à l'export
-        export_node->left = declaration;
-        
-        const char* type_str = "unknown";
-        switch (decl_type) {
-            case TK_FUNC: type_str = "function"; break;
-            case TK_VAR: case TK_LET: case TK_CONST: 
-            case TK_NET: case TK_CLOG: case TK_DOS: case TK_SEL: 
-                type_str = "variable"; break;
-            case TK_CLASS: type_str = "class"; break;
-            case TK_STRUCT: type_str = "struct"; break;
-            case TK_ENUM: type_str = "enum"; break;
-            default: type_str = "declaration"; break;
-        }
-        
-        printf("%s[PARSER]%s Export %s: %s as %s\n", 
-               COLOR_GREEN, COLOR_RESET, 
-               type_str,
-               symbol_name ? symbol_name : "(unnamed)",
-               alias_name ? alias_name : "(default)");
-        
-        return export_node;
-    }
-    
-    // Deuxième possibilité : export d'un symbole nommé (pour les exports nommés)
-    if (match(TK_IDENT) || match(TK_STRING)) {
-        symbol_name = str_copy(previous.value.str_val);
-        
-        // Optionnel : alias avec 'as'
-        if (match(TK_AS)) {
-            if (!match(TK_IDENT) && !match(TK_STRING)) {
-                errorAtCurrent("Expected alias name after 'as'");
-                free(symbol_name);
-                free(export_node);
                 return NULL;
             }
             alias_name = str_copy(previous.value.str_val);
@@ -2218,29 +2188,13 @@ static ASTNode* exportStatement() {
             alias_name = str_copy(symbol_name);
         }
         
+        ASTNode* export_node = newNode(NODE_EXPORT);
         export_node->data.export.symbol = symbol_name;
         export_node->data.export.alias = alias_name;
-        
-        consume(TK_SEMICOLON, "Expected ';' after export statement");
-        
-        printf("%s[PARSER]%s Export named: %s as %s\n", 
-               COLOR_GREEN, COLOR_RESET, symbol_name, alias_name);
+        export_node->left = declaration;
         
         return export_node;
     }
-    
-    // Troisième possibilité : export de liste { a, b as c }
-    if (match(TK_LBRACE)) {
-        // Pour les exports nommés multiples
-        errorAtCurrent("Named exports not fully implemented yet");
-        free(export_node);
-        return NULL;
-    }
-    
-    errorAtCurrent("Expected declaration or symbol name after export");
-    free(export_node);
-    return NULL;
-}
 // ======================================================
 // [SECTION] SPECIAL DECLARATIONS
 // ======================================================
