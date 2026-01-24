@@ -1328,17 +1328,26 @@ case NODE_DIR_LIST:
         }
             
         case NODE_RETURN: {
-            if (current_function) {
-                current_function->has_returned = true;
-                if (node->left) {
-                    current_function->return_value = evalFloat(node->left);
-                    char* str_val = evalString(node->left);
-                    current_function->return_string = str_copy(str_val);
-                    free(str_val);
-                }
+    if (current_function) {
+        current_function->has_returned = true;
+        if (node->left) {
+            current_function->return_value = evalFloat(node->left);
+            char* str_val = evalString(node->left);
+            if (current_function->return_string) {
+                free(current_function->return_string);
             }
-            break;
+            current_function->return_string = str_copy(str_val);
+            free(str_val);
+        } else {
+            current_function->return_value = 0;
+            if (current_function->return_string) {
+                free(current_function->return_string);
+                current_function->return_string = NULL;
+            }
         }
+    }
+    break;
+   }
             
         case NODE_BLOCK: {
             int old_scope = scope_level;
