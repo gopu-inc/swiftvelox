@@ -151,7 +151,6 @@ typedef struct {
 
 static FileHandle open_files[50];
 static int file_count = 0;
-
 // ======================================================
 // [SECTION] FUNCTION DECLARATIONS
 // ======================================================
@@ -168,6 +167,12 @@ static void showHelp();
 static void executeRead(ASTNode* node);
 static void executeWrite(ASTNode* node);
 static void executeAppend(ASTNode* node);
+static void run(const char* source, const char* filename);
+static void repl();
+static char* loadFile(const char* filename);
+static char* resolveModulePath(const char* import_path, const char* from_module);
+static bool isLocalImport(const char* import_path);
+static bool isSymbolExported(const char* symbol, const char* module_path);
 
 // ======================================================
 // [SECTION] HELPER FUNCTIONS
