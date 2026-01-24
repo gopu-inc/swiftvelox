@@ -268,11 +268,73 @@ static void registerFunction(const char* name, ASTNode* params, ASTNode* body, i
 }
 
 static Function* findFunction(const char* name) {
+    // Chercher exact
     for (int i = 0; i < func_count; i++) {
         if (strcmp(functions[i].name, name) == 0) {
             return &functions[i];
         }
     }
+    
+    // Si nom contient un point (module.func), extraire module
+    const char* dot = strchr(name, '.');
+    if (dot) {
+        // Essayer de trouver une fonction correspondante sans namespace
+        const char* func_name = dot + 1;
+        for (int i = 0; i < func_count; i++) {
+            const char* func_dot = strchr(functions[i].name, '.');
+            if (func_dot && strcmp(func_dot + 1, func_name) == 0) {
+                return &functions[i];
+            }
+        }
+    }
+    
+    // Chercher dans les exports
+    for (int i = 0; i < export_count; i++) {
+        if (strcmp(exports[i].alias, name) == 0) {
+            // Trouver la fonction par son nom original
+            for (int j = 0; j < func_count; j++) {
+                if (strcmp(functions[j].name, exports[i].symbol) == 0) {
+                    return &functions[j];
+                }
+            }
+        }
+    }
+    
+    return NULL;
+}
+static Function* findFunction(const char* name) {
+    // Chercher exact
+    for (int i = 0; i < func_count; i++) {
+        if (strcmp(functions[i].name, name) == 0) {
+            return &functions[i];
+        }
+    }
+    
+    // Si nom contient un point (module.func), extraire module
+    const char* dot = strchr(name, '.');
+    if (dot) {
+        // Essayer de trouver une fonction correspondante sans namespace
+        const char* func_name = dot + 1;
+        for (int i = 0; i < func_count; i++) {
+            const char* func_dot = strchr(functions[i].name, '.');
+            if (func_dot && strcmp(func_dot + 1, func_name) == 0) {
+                return &functions[i];
+            }
+        }
+    }
+    
+    // Chercher dans les exports
+    for (int i = 0; i < export_count; i++) {
+        if (strcmp(exports[i].alias, name) == 0) {
+            // Trouver la fonction par son nom original
+            for (int j = 0; j < func_count; j++) {
+                if (strcmp(functions[j].name, exports[i].symbol) == 0) {
+                    return &functions[j];
+                }
+            }
+        }
+    }
+    
     return NULL;
 }
 
