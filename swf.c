@@ -162,6 +162,30 @@ static FileHandle open_files[50];
 static int file_count = 0;
 
 // ======================================================
+// [SECTION] SIMPLE IMPORT DATABASE STRUCTURES
+// ======================================================
+typedef struct {
+    char* module_path;
+    char* resolved_path;
+    char* from_module;
+    time_t import_time;
+    bool active;
+} ImportRecord;
+
+typedef struct {
+    char* module_path;
+    char* symbol;
+    char* alias;
+    char* symbol_type;
+    int import_id;
+} ExportRecord;
+
+static ImportRecord import_db[1000];
+static ExportRecord export_db[5000];
+static int import_count = 0;
+static int export_count_simple = 0;
+
+// ======================================================
 // [SECTION] FUNCTION DECLARATIONS
 // ======================================================
 static void execute(ASTNode* node);
@@ -638,10 +662,11 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     
     printf("%s[IMPORT DEBUG]%s Resolved path: %s\n", COLOR_YELLOW, COLOR_RESET, full_path);
     
-    // 2. Vérifier si déjà importé (version simple)
+    // 2. Vérifier si déjà importé
     bool already_imported = false;
     for (int i = 0; i < import_count; i++) {
-        if (strcmp(import_db[i].module_path, import_path) == 0 &&
+        if (import_db[i].active && 
+            strcmp(import_db[i].module_path, import_path) == 0 &&
             strcmp(import_db[i].from_module, from_module ? from_module : "") == 0) {
             already_imported = true;
             break;
@@ -770,13 +795,12 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     
     printf("%s[CRITICAL FIX]%s After direct registration: func_count=%d, var_count=%d\n", COLOR_BRIGHT_RED, COLOR_RESET, func_count, var_count);
     
-    // 8. Exécuter les déclarations pour enregistrer les exports
-    printf("%s[IMPORT DEBUG]%s Executing declarations to register exports...\n", COLOR_YELLOW, COLOR_RESET);
+    // 8. Exécuter les exports pour les enregistrer
+    printf("%s[IMPORT DEBUG]%s Executing exports...\n", COLOR_YELLOW, COLOR_RESET);
     
     for (int i = 0; i < node_count; i++) {
-        if (nodes[i] && (nodes[i]->type == NODE_EXPORT || nodes[i]->type == NODE_FUNC || 
-                         nodes[i]->type == NODE_CONST_DECL || nodes[i]->type == NODE_VAR_DECL)) {
-            printf("%s[IMPORT DEBUG]%s Executing node %d (type: %d)\n", COLOR_YELLOW, COLOR_RESET, i, nodes[i]->type);
+        if (nodes[i] && nodes[i]->type == NODE_EXPORT) {
+            printf("%s[IMPORT DEBUG]%s Executing export node %d\n", COLOR_YELLOW, COLOR_RESET, i);
             execute(nodes[i]);
         }
     }
@@ -790,34 +814,34 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
         rec->import_time = time(NULL);
         rec->active = true;
         import_count++;
-        printf("%s[DB]%s Registered import: %s\n", COLOR_GREEN, COLOR_RESET, import_path);
+        printf("%s[DB SIMPLE]%s Registered import: %s\n", COLOR_GREEN, COLOR_RESET, import_path);
     }
     
     // 10. Enregistrer les exports dans la DB simple
     for (int i = old_export_count; i < export_count; i++) {
         ExportEntry* exp = &exports[i];
         
-        // Déterminer le type
-        const char* type = "unknown";
-        for (int j = 0; j < node_count; j++) {
-            if (nodes[j] && nodes[j]->data.name && strcmp(nodes[j]->data.name, exp->symbol) == 0) {
-                if (nodes[j]->type == NODE_FUNC) type = "function";
-                else if (nodes[j]->type == NODE_CONST_DECL) type = "constant";
-                else if (nodes[j]->type == NODE_VAR_DECL) type = "variable";
-                break;
-            }
-        }
-        
-        // Enregistrer
-        if (export_count < 5000) {
-            ExportRecord* erec = &export_db[export_count];
+        if (export_count_simple < 5000) {
+            ExportRecord* erec = &export_db[export_count_simple];
             erec->module_path = str_copy(import_path);
             erec->symbol = str_copy(exp->symbol);
             erec->alias = str_copy(exp->alias ? exp->alias : exp->symbol);
+            
+            // Déterminer le type
+            const char* type = "unknown";
+            for (int j = 0; j < node_count; j++) {
+                if (nodes[j] && nodes[j]->data.name && strcmp(nodes[j]->data.name, exp->symbol) == 0) {
+                    if (nodes[j]->type == NODE_FUNC) type = "function";
+                    else if (nodes[j]->type == NODE_CONST_DECL) type = "constant";
+                    else if (nodes[j]->type == NODE_VAR_DECL) type = "variable";
+                    break;
+                }
+            }
+            
             erec->symbol_type = str_copy(type);
             erec->import_id = import_count - 1;
-            export_count++;
-            printf("%s[DB]%s Recorded export: %s.%s as %s\n", COLOR_GREEN, COLOR_RESET, 
+            export_count_simple++;
+            printf("%s[DB SIMPLE]%s Recorded export: %s.%s as %s\n", COLOR_GREEN, COLOR_RESET, 
                    import_path, exp->symbol, exp->alias ? exp->alias : exp->symbol);
         }
     }
@@ -828,7 +852,6 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     for (int i = 0; i < node_count; i++) {
         if (nodes[i] && nodes[i]->type != NODE_EXPORT && nodes[i]->type != NODE_FUNC && 
             nodes[i]->type != NODE_CONST_DECL && nodes[i]->type != NODE_VAR_DECL) {
-            printf("%s[IMPORT DEBUG]%s Executing node %d (type: %d)\n", COLOR_YELLOW, COLOR_RESET, i, nodes[i]->type);
             execute(nodes[i]);
         }
     }
@@ -838,8 +861,6 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     printf("%s[IMPORT DEBUG]%s Working directory restored: %s\n", COLOR_YELLOW, COLOR_RESET, current_working_dir);
     
     // 13. Nettoyer
-    printf("%s[IMPORT DEBUG]%s Cleaning up AST nodes...\n", COLOR_YELLOW, COLOR_RESET);
-    
     for (int i = 0; i < node_count; i++) {
         if (nodes[i]) {
             if (nodes[i]->type == NODE_STRING && nodes[i]->data.str_val) free(nodes[i]->data.str_val);
