@@ -1,8 +1,5 @@
-// http.h
 #ifndef HTTP_H
 #define HTTP_H
-
-#include "common.h"
 
 void init_http_module(void);
 char* http_get(const char* url);
