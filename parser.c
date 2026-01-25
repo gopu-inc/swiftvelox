@@ -207,6 +207,14 @@ static ASTNode* netAcceptStatement();
 static ASTNode* netSendStatement();
 static ASTNode* netRecvStatement();
 static ASTNode* netCloseStatement();
+static ASTNode* httpGetStatement();
+static ASTNode* httpPostStatement();
+static ASTNode* httpDownloadStatement();
+static ASTNode* sysExecStatement();
+static ASTNode* sysArgvStatement();
+static ASTNode* sysExitStatement();
+static ASTNode* jsonGetStatement();
+
 
 // Main expression entry point
 static ASTNode* expression() {
@@ -615,12 +623,82 @@ static ASTNode* memberAccess() {
     return expr;
 }
 
+// RESEAUX http et systeme et json
+static ASTNode* httpGetStatement() {
+    ASTNode* node = newNode(NODE_HTTP_GET);
+    consume(TK_LPAREN, "Expected '(' after http.get");
+    node->left = expression(); // url
+    consume(TK_RPAREN, "Expected ')'");
+    return node;
+}
+
+static ASTNode* httpPostStatement() {
+    ASTNode* node = newNode(NODE_HTTP_POST);
+    consume(TK_LPAREN, "Expected '(' after http.post");
+    node->left = expression(); // url
+    consume(TK_COMMA, "Expected ','");
+    node->right = expression(); // json data
+    consume(TK_RPAREN, "Expected ')'");
+    return node;
+}
+
+static ASTNode* httpDownloadStatement() {
+    ASTNode* node = newNode(NODE_HTTP_DOWNLOAD);
+    consume(TK_LPAREN, "Expected '(' after http.download");
+    node->left = expression(); // url
+    consume(TK_COMMA, "Expected ','");
+    node->right = expression(); // output filename
+    consume(TK_RPAREN, "Expected ')'");
+    return node;
+}
+
+static ASTNode* sysExecStatement() {
+    ASTNode* node = newNode(NODE_SYS_EXEC);
+    consume(TK_LPAREN, "Expected '(' after sys.exec");
+    node->left = expression(); // command
+    consume(TK_RPAREN, "Expected ')'");
+    // Souvent utilisé comme instruction (void) ou expression (int return code)
+    if (check(TK_SEMICOLON)) advance(); 
+    return node;
+}
+
+static ASTNode* sysArgvStatement() {
+    ASTNode* node = newNode(NODE_SYS_ARGV);
+    consume(TK_LPAREN, "Expected '(' after sys.argv");
+    node->left = expression(); // index
+    consume(TK_RPAREN, "Expected ')'");
+    return node;
+}
+
+static ASTNode* sysExitStatement() {
+    ASTNode* node = newNode(NODE_SYS_EXIT);
+    consume(TK_LPAREN, "Expected '(' after sys.exit");
+    if (!check(TK_RPAREN)) node->left = expression(); // code (optional)
+    consume(TK_RPAREN, "Expected ')'");
+    consume(TK_SEMICOLON, "Expected ';'");
+    return node;
+}
+
+static ASTNode* jsonGetStatement() {
+    ASTNode* node = newNode(NODE_JSON_GET);
+    consume(TK_LPAREN, "Expected '(' after json.get");
+    node->left = expression(); // json string
+    consume(TK_COMMA, "Expected ','");
+    node->right = expression(); // key
+    consume(TK_RPAREN, "Expected ')'");
+    return node;
+}
 // Primary expressions
 static ASTNode* primary() {
     // Try lambda first
     ASTNode* lambda = lambdaExpression();
     if (lambda) return lambda;
-    
+    if (match(TK_HTTP_GET)) return httpGetStatement();
+    if (match(TK_HTTP_POST)) return httpPostStatement();
+    if (match(TK_HTTP_DOWNLOAD)) return httpDownloadStatement();
+    if (match(TK_SYS_EXEC)) return sysExecStatement(); // Retourne le code de sortie
+    if (match(TK_SYS_ARGV)) return sysArgvStatement();
+    if (match(TK_JSON_GET)) return jsonGetStatement();
     if (match(TK_TRUE)) return newBoolNode(true);
     if (match(TK_FALSE)) return newBoolNode(false);
     if (match(TK_NULL)) return newNode(NODE_NULL);
@@ -2389,6 +2467,10 @@ static ASTNode* statement() {
         consume(TK_SEMICOLON, "Expected ';' after importdb");
          return node;
     }
+    
+    if (match(TK_SYS_EXIT)) return sysExitStatement();
+    // sys.exec peut aussi être un statement
+    if (match(TK_SYS_EXEC)) return sysExecStatement();
     if (match(TK_NET_CONNECT)) return netConnectStatement();
     if (match(TK_NET_SEND)) return netSendStatement();
     if (match(TK_NET_CLOSE)) return netCloseStatement();
