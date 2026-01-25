@@ -1,6 +1,9 @@
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 700
 #include <stdio.h>
+#include "http.h"
+#include "sys.h"
+#include "json.h" // on déclare le prototype ici
 #include "net.h"
 #include "io.h"
 #include <stdlib.h>
