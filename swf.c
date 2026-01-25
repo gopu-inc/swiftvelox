@@ -475,6 +475,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
                     break;
                 }
             }
+        }
             
             if (!found) {
                 printf("%s[IMPORT WARNING]%s Symbol not exported: %s\n", 
