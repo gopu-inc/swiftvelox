@@ -109,12 +109,15 @@ typedef enum {
     
     // I/O
     TK_PRINT, TK_WELD, TK_READ, TK_WRITE,
-    // Ajoute dans TokenKind :
     TK_IO_OPEN, TK_IO_CLOSE, TK_IO_READ, TK_IO_WRITE,
     TK_IO_SEEK, TK_IO_TELL, TK_IO_FLUSH,
     TK_IO_EXISTS, TK_IO_ISFILE, TK_IO_ISDIR,
     TK_IO_MKDIR, TK_IO_RMDIR, TK_IO_LISTDIR,
     TK_IO_REMOVE, TK_IO_RENAME, TK_IO_COPY,
+
+    // reseaux
+    TK_NET_SOCKET, TK_NET_CONNECT, TK_NET_LISTEN, TK_NET_ACCEPT,
+    TK_NET_SEND, TK_NET_RECV, TK_NET_CLOSE,
     // New keywords
     TK_PASS, TK_GLOBAL, TK_LAMBDA,
     TK_BDD, TK_DEF, TK_TYPE, TK_RAISE,
@@ -160,7 +163,13 @@ static const Keyword keywords[] = {
     // Variables
     {"var", TK_VAR}, {"let", TK_LET}, {"const", TK_CONST},
     {"net", TK_NET}, {"clog", TK_CLOG}, {"dos", TK_DOS}, {"sel", TK_SEL},
-    
+    {"net.socket", TK_NET_SOCKET},
+    {"net.connect", TK_NET_CONNECT},
+    {"net.listen", TK_NET_LISTEN},
+    {"net.accept", TK_NET_ACCEPT},
+    {"net.send", TK_NET_SEND},
+    {"net.recv", TK_NET_RECV},
+    {"net.close", TK_NET_CLOSE},
     // Control flow
     {"if", TK_IF}, {"else", TK_ELSE}, {"elif", TK_ELIF},
     {"while", TK_WHILE}, {"for", TK_FOR}, {"do", TK_DO},
@@ -243,6 +252,15 @@ static const Keyword keywords[] = {
 // Dans common.h - Section NodeType
 typedef enum {
     // Expressions
+    // reseaux
+    NODE_NET_SOCKET,
+    NODE_NET_CONNECT,
+    NODE_NET_LISTEN,
+    NODE_NET_ACCEPT,
+    NODE_NET_SEND,
+    NODE_NET_RECV,
+    NODE_NET_CLOSE,
+    // expression
     NODE_INT,
     NODE_FLOAT,
     NODE_STRING,
