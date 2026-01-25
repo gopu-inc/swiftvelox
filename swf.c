@@ -461,9 +461,22 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
         for (int j = 0; j < node_count; j++) {
             if (!nodes[j]) continue;
             
-            // Pour les fonctions exportées
-            if (nodes[j]->type == NODE_FUNC && nodes[j]->data.name && 
-                exp->symbol && strcmp(nodes[j]->data.name, exp->symbol) == 0) {
+            // --- CORRECTION: Gestion des noeuds NODE_EXPORT ---
+            
+            ASTNode* target_func = NULL;
+            
+            // Cas 1: C'est directement une fonction
+            if (nodes[j]->type == NODE_FUNC) {
+                target_func = nodes[j];
+            }
+            // Cas 2: C'est un EXPORT qui contient une fonction
+            else if (nodes[j]->type == NODE_EXPORT && nodes[j]->left && nodes[j]->left->type == NODE_FUNC) {
+                target_func = nodes[j]->left;
+            }
+
+            // Si on a trouvé la fonction correspondant au symbole recherché
+            if (target_func && target_func->data.name && 
+                exp->symbol && strcmp(target_func->data.name, exp->symbol) == 0) {
                 
                 char* name_to_use = exp->alias ? exp->alias : exp->symbol;
                 printf("%s[IMPORT DEBUG]%s Registering function: %s -> %s\n",
@@ -471,58 +484,77 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
                 
                 // Compter les paramètres
                 int param_count = 0;
-                ASTNode* param = nodes[j]->left;
+                ASTNode* param = target_func->left;
                 while (param) {
                     param_count++;
                     param = param->right;
                 }
                 
                 // Enregistrer la fonction
-                registerFunction(name_to_use, nodes[j]->left, nodes[j]->right, param_count);
-                break;
+                registerFunction(name_to_use, target_func->left, target_func->right, param_count);
+                break; // Trouvé, passer à l'export suivant
             }
             
-            // Pour les constantes exportées
-            if (nodes[j]->type == NODE_CONST_DECL && nodes[j]->data.name && 
-                exp->symbol && strcmp(nodes[j]->data.name, exp->symbol) == 0) {
+            // --- GESTION DES VARIABLES EXPORTÉES ---
+            
+            ASTNode* target_var = NULL;
+            
+            // Cas 1: Déclaration directe
+            if (nodes[j]->type == NODE_CONST_DECL || nodes[j]->type == NODE_VAR_DECL || 
+                nodes[j]->type == NODE_LET || nodes[j]->type == NODE_NET_DECL) {
+                target_var = nodes[j];
+            }
+            // Cas 2: Export contenant une déclaration
+            else if (nodes[j]->type == NODE_EXPORT && nodes[j]->left && 
+                    (nodes[j]->left->type == NODE_CONST_DECL || nodes[j]->left->type == NODE_VAR_DECL ||
+                     nodes[j]->left->type == NODE_LET || nodes[j]->left->type == NODE_NET_DECL)) {
+                target_var = nodes[j]->left;
+            }
+
+            if (target_var && target_var->data.name && 
+                exp->symbol && strcmp(target_var->data.name, exp->symbol) == 0) {
                 
                 char* name_to_use = exp->alias ? exp->alias : exp->symbol;
-                printf("%s[IMPORT DEBUG]%s Creating constant: %s -> %s\n",
+                printf("%s[IMPORT DEBUG]%s Creating constant/var: %s -> %s\n",
                        COLOR_GREEN, COLOR_RESET, exp->symbol, name_to_use);
                 
-                // Créer une variable constante
+                // Créer une variable
                 if (var_count < 1000) {
                     Variable* var = &vars[var_count];
                     strncpy(var->name, name_to_use, 99);
                     var->name[99] = '\0';
-                    var->type = TK_CONST;
+                    
+                    // Déterminer le type (par défaut CONST si exporté comme const, sinon VAR)
+                    if (target_var->type == NODE_CONST_DECL) var->type = TK_CONST;
+                    else var->type = TK_VAR;
+
                     var->scope_level = 0;
-                    var->is_constant = true;
+                    var->is_constant = (var->type == TK_CONST);
                     var->is_initialized = true;
                     
-                    if (nodes[j]->left) {
-                        if (nodes[j]->left->type == NODE_INT) {
+                    // Récupération de la valeur
+                    if (target_var->left) {
+                        if (target_var->left->type == NODE_INT) {
                             var->is_float = false;
                             var->is_string = false;
-                            var->value.int_val = nodes[j]->left->data.int_val;
-                        } else if (nodes[j]->left->type == NODE_FLOAT) {
+                            var->value.int_val = target_var->left->data.int_val;
+                        } else if (target_var->left->type == NODE_FLOAT) {
                             var->is_float = true;
                             var->is_string = false;
-                            var->value.float_val = nodes[j]->left->data.float_val;
-                        } else if (nodes[j]->left->type == NODE_STRING) {
+                            var->value.float_val = target_var->left->data.float_val;
+                        } else if (target_var->left->type == NODE_STRING) {
                             var->is_string = true;
                             var->is_float = false;
-                            var->value.str_val = str_copy(nodes[j]->left->data.str_val);
-                        } else if (nodes[j]->left->type == NODE_BOOL) {
+                            var->value.str_val = str_copy(target_var->left->data.str_val);
+                        } else if (target_var->left->type == NODE_BOOL) {
                             var->is_float = false;
                             var->is_string = false;
-                            var->value.int_val = nodes[j]->left->data.bool_val ? 1 : 0;
+                            var->value.int_val = target_var->left->data.bool_val ? 1 : 0;
                         }
                     }
-                    
                     var_count++;
                 }
-                break;
+                break; // Trouvé
             }
         }
     }
@@ -548,21 +580,19 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
         }
     }
     
-    // 9. Exécuter le code d'initialisation du module (sauf fonctions)
+    // 9. Exécuter le code d'initialisation du module (sauf fonctions et déclarations)
     printf("%s[IMPORT DEBUG]%s Executing module initialization code...\n",
            COLOR_YELLOW, COLOR_RESET);
     
     for (int i = 0; i < node_count; i++) {
-        if (nodes[i] && nodes[i]->type != NODE_FUNC) {
+        if (nodes[i] && nodes[i]->type != NODE_FUNC && nodes[i]->type != NODE_EXPORT) {
+            // On évite d'exécuter les déclarations de fonctions ou les exports (déjà traités)
+            // Mais on exécute les appels de fonction de haut niveau ou autres instructions
             printf("%s[IMPORT DEBUG]%s Executing node %d (type: %d)\n",
                    COLOR_YELLOW, COLOR_RESET, i, nodes[i]->type);
             execute(nodes[i]);
         }
     }
-    
-    // 10. Nettoyer les exports spécifiques à ce module (optionnel)
-    // Pour éviter la pollution, on peut les supprimer si on veut
-    // Mais gardons-les pour référence future
     
     // 11. Restaurer l'état
     strncpy(current_working_dir, old_dir, PATH_MAX);
@@ -581,8 +611,13 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
             if (nodes[i]->type == NODE_IDENT && nodes[i]->data.name) {
                 free(nodes[i]->data.name);
             }
+            // Attention: on ne libère pas le nom de la fonction si on l'a enregistré dans registerFunction
+            // (registerFunction fait souvent une copie ou utilise le pointeur)
+            // Ici on fait un nettoyage basique
             if (nodes[i]->type == NODE_FUNC && nodes[i]->data.name) {
-                free(nodes[i]->data.name);
+                // Si la fonction n'a pas été enregistrée (ex: locale au module), on devrait libérer
+                // Mais pour simplifier et éviter double-free si registerFunction utilise le pointeur, on peut laisser
+                free(nodes[i]->data.name); 
             }
             free(nodes[i]);
         }
@@ -602,6 +637,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     
     return true;
 }
+
 static bool isSymbolExported(const char* symbol, const char* module_path) {
     for (int i = 0; i < export_count; i++) {
         if (strcmp(exports[i].symbol, symbol) == 0 &&
