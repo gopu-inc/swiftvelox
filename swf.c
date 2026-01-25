@@ -688,7 +688,15 @@ static double evalFloat(ASTNode* node) {
     if (!node) return 0.0;
     
     switch (node->type) {
-        
+        // cmd sys
+        case NODE_SYS_EXEC: {
+            char* cmd = evalString(node->left);
+            // sys_exec_int est une nouvelle fonction dans sys.c qui retourne le int
+            // ou on adapte sys_exec pour retourner int
+            int res = system(cmd); 
+            if (cmd) free(cmd);
+            return (double)res;
+        }
         case NODE_NET_SOCKET:
             return (double)net_socket_create();
             
@@ -890,7 +898,43 @@ static char* evalString(ASTNode* node) {
     if (!node) return str_copy("");
     
     switch (node->type) {
-        
+        case NODE_HTTP_GET: {
+            char* url = evalString(node->left);
+            char* res = http_get(url);
+            if (url) free(url);
+            return res ? res : str_copy("");
+        }
+        case NODE_HTTP_POST: {
+            char* url = evalString(node->left);
+            char* data = evalString(node->right);
+            char* res = http_post(url, data);
+            if (url) free(url);
+            if (data) free(data);
+            return res ? res : str_copy("");
+        }
+        case NODE_HTTP_DOWNLOAD: {
+            char* url = evalString(node->left);
+            char* out = evalString(node->right);
+            char* res = http_download(url, out);
+            if (url) free(url);
+            if (out) free(out);
+            return res ? res : str_copy("failed");
+        }
+        case NODE_SYS_ARGV: {
+            int idx = (int)evalFloat(node->left);
+            // On suppose une fonction sys_get_argv(idx) dans sys.c
+            char* arg = sys_get_argv(idx); 
+            return arg ? str_copy(arg) : NULL;
+        }
+        case NODE_JSON_GET: {
+            char* json = evalString(node->left);
+            char* key = evalString(node->right);
+            // On suppose une fonction json_extract(json, key) dans json.c
+            char* res = json_extract(json, key);
+            if (json) free(json);
+            if (key) free(key);
+            return res ? res : NULL;
+        }
         case NODE_NET_RECV: {
             int fd = (int)evalFloat(node->left); // Évaluation du FD
             int size = 1024;
@@ -1250,6 +1294,20 @@ static void execute(ASTNode* node) {
     if (!node) return;
     
     switch (node->type) {
+        // Dans execute, ajoute :
+        case NODE_SYS_EXIT: {
+            int code = 0;
+            if (node->left) code = (int)evalFloat(node->left);
+            exit(code);
+            break;
+        }
+        case NODE_SYS_EXEC: {
+             // Si utilisé comme instruction simple sans récupération de variable
+             char* cmd = evalString(node->left);
+             system(cmd);
+             if (cmd) free(cmd);
+             break;
+        }
         case NODE_EXPORT: {
     printf("%s[EXECUTE EXPORT]%s Processing export\n", COLOR_MAGENTA, COLOR_RESET);
     
@@ -1953,6 +2011,8 @@ static char* loadFile(const char* filename) {
 int main(int argc, char* argv[]) {
     srand(time(NULL));
     init_io_module();
+    init_sys_module(argc, argv);
+    init_http_module();
     // Handle command line arguments
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
