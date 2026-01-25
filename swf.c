@@ -674,28 +674,31 @@ static void clear_import_db() {
 // ======================================================
 static bool loadAndExecuteModule(const char* import_path, const char* from_module, 
                                  bool import_named, char** named_symbols, int symbol_count) {
-    printf("\n%s-%s\n", 
-           COLOR_BRIGHT_RED, COLOR_RESET);
-    printf("%s>>> LOAD AND EXEC MODULE: %s <<<%s\n", 
-           COLOR_BRIGHT_RED, COLOR_RESET, import_path);
-    printf("%s-%s\n\n", 
-           COLOR_BRIGHT_RED, COLOR_RESET);
+    printf("\n%s-%s\n", COLOR_BRIGHT_RED, COLOR_RESET);
+    printf("%s>>> LOAD AND EXEC MODULE: %s <<<%s\n", COLOR_BRIGHT_RED, COLOR_RESET, import_path);
+    printf("%s-%s\n\n", COLOR_BRIGHT_RED, COLOR_RESET);
     
-    // 1. Résoudre le chemin du module
+    // 1. Résoudre le chemin
     char* full_path = resolveModulePath(import_path, from_module);
     if (!full_path) {
-        printf("%s[IMPORT ERROR]%s Cannot resolve module path: %s\n", 
-               COLOR_RED, COLOR_RESET, import_path);
+        printf("%s[IMPORT ERROR]%s Cannot resolve module path: %s\n", COLOR_RED, COLOR_RESET, import_path);
         return false;
     }
     
-    printf("%s[IMPORT DEBUG]%s Resolved path: %s\n", 
-           COLOR_YELLOW, COLOR_RESET, full_path);
+    printf("%s[IMPORT DEBUG]%s Resolved path: %s\n", COLOR_YELLOW, COLOR_RESET, full_path);
     
-    // 2. Vérifier si déjà importé
-    if (is_module_imported_simple(import_path, from_module)) {
-        printf("%s[IMPORT INFO]%s Module already imported: %s\n", 
-               COLOR_YELLOW, COLOR_RESET, import_path);
+    // 2. Vérifier si déjà importé (version simple)
+    bool already_imported = false;
+    for (int i = 0; i < import_count; i++) {
+        if (strcmp(import_db[i].module_path, import_path) == 0 &&
+            strcmp(import_db[i].from_module, from_module ? from_module : "") == 0) {
+            already_imported = true;
+            break;
+        }
+    }
+    
+    if (already_imported) {
+        printf("%s[IMPORT INFO]%s Module already imported: %s\n", COLOR_YELLOW, COLOR_RESET, import_path);
         free(full_path);
         return true;
     }
@@ -703,8 +706,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     // 3. Ouvrir le fichier
     FILE* f = fopen(full_path, "r");
     if (!f) {
-        printf("%s[IMPORT ERROR]%s Cannot open file: %s\n", 
-               COLOR_RED, COLOR_RESET, full_path);
+        printf("%s[IMPORT ERROR]%s Cannot open file: %s\n", COLOR_RED, COLOR_RESET, full_path);
         free(full_path);
         return false;
     }
@@ -716,8 +718,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     
     char* source = malloc(size + 1);
     if (!source) {
-        printf("%s[IMPORT ERROR]%s Memory allocation failed\n", 
-               COLOR_RED, COLOR_RESET);
+        printf("%s[IMPORT ERROR]%s Memory allocation failed\n", COLOR_RED, COLOR_RESET);
         fclose(f);
         free(full_path);
         return false;
@@ -727,10 +728,9 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     source[size] = '\0';
     fclose(f);
     
-    printf("%s[IMPORT DEBUG]%s File read: %ld bytes\n", 
-           COLOR_YELLOW, COLOR_RESET, size);
+    printf("%s[IMPORT DEBUG]%s File read: %ld bytes\n", COLOR_YELLOW, COLOR_RESET, size);
     
-    // 5. Sauvegarder l'état actuel
+    // 5. Sauvegarder l'état
     char old_dir[PATH_MAX];
     strncpy(old_dir, current_working_dir, PATH_MAX);
     
@@ -739,10 +739,9 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     char* dir = dirname(module_dir);
     strncpy(current_working_dir, dir, PATH_MAX);
     
-    printf("%s[IMPORT DEBUG]%s Working directory changed: %s -> %s\n", 
-           COLOR_YELLOW, COLOR_RESET, old_dir, current_working_dir);
+    printf("%s[IMPORT DEBUG]%s Working directory changed: %s -> %s\n", COLOR_YELLOW, COLOR_RESET, old_dir, current_working_dir);
     
-    // 6. Sauvegarder les exports existants AVANT l'import
+    // 6. Sauvegarder les compteurs avant
     int old_export_count = export_count;
     int old_func_count = func_count;
     int old_var_count = var_count;
@@ -760,221 +759,141 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
         return false;
     }
     
-    printf("%s[IMPORT DEBUG]%s Module parsed successfully: %d nodes\n", 
-           COLOR_GREEN, COLOR_RESET, node_count);
+    printf("%s[IMPORT DEBUG]%s Module parsed successfully: %d nodes\n", COLOR_GREEN, COLOR_RESET, node_count);
     
-    // DEBUG: Afficher les nœuds
-    printf("%s[IMPORT DEBUG]%s === NODE DUMP ===\n", COLOR_CYAN, COLOR_RESET);
+    // === CRITICAL FIX: Register functions from parsed nodes ===
+    printf("%s[CRITICAL FIX]%s Searching for functions in %d nodes...\n", COLOR_BRIGHT_RED, COLOR_RESET, node_count);
+    
     for (int i = 0; i < node_count; i++) {
-        if (nodes[i]) {
-            printf("%s[IMPORT DEBUG]%s Node %d: type=%d", 
-                   COLOR_CYAN, COLOR_RESET, i, nodes[i]->type);
+        if (nodes[i] && nodes[i]->type == NODE_FUNC && nodes[i]->data.name) {
+            printf("%s[CRITICAL FIX]%s Found function: %s\n", COLOR_BRIGHT_RED, COLOR_RESET, nodes[i]->data.name);
             
-            if (nodes[i]->type == NODE_FUNC && nodes[i]->data.name) {
-                printf(" (FUNC: %s)", nodes[i]->data.name);
+            // Compter les paramètres
+            int param_count = 0;
+            ASTNode* param = nodes[i]->left;
+            while (param) {
+                param_count++;
+                param = param->right;
             }
-            else if (nodes[i]->type == NODE_EXPORT) {
-                printf(" (EXPORT)");
-                if (nodes[i]->data.export.symbol) {
-                    printf(" symbol=%s", nodes[i]->data.export.symbol);
+            
+            // Enregistrer la fonction directement
+            registerFunction(nodes[i]->data.name, nodes[i]->left, nodes[i]->right, param_count);
+            printf("%s[CRITICAL FIX]%s Registered function: %s (%d params)\n", COLOR_BRIGHT_GREEN, COLOR_RESET, nodes[i]->data.name, param_count);
+        }
+        
+        // Aussi chercher les constantes
+        if (nodes[i] && (nodes[i]->type == NODE_CONST_DECL || nodes[i]->type == NODE_VAR_DECL) && nodes[i]->data.name) {
+            printf("%s[CRITICAL FIX]%s Found variable: %s\n", COLOR_BRIGHT_RED, COLOR_RESET, nodes[i]->data.name);
+            
+            // Créer la variable directement
+            if (var_count < 1000) {
+                Variable* var = &vars[var_count];
+                strncpy(var->name, nodes[i]->data.name, 99);
+                var->name[99] = '\0';
+                var->type = (nodes[i]->type == NODE_CONST_DECL) ? TK_CONST : TK_VAR;
+                var->scope_level = 0;
+                var->is_constant = (nodes[i]->type == NODE_CONST_DECL);
+                var->is_initialized = true;
+                
+                if (nodes[i]->left) {
+                    if (nodes[i]->left->type == NODE_INT) {
+                        var->is_float = false;
+                        var->is_string = false;
+                        var->value.int_val = nodes[i]->left->data.int_val;
+                    } else if (nodes[i]->left->type == NODE_FLOAT) {
+                        var->is_float = true;
+                        var->is_string = false;
+                        var->value.float_val = nodes[i]->left->data.float_val;
+                    } else if (nodes[i]->left->type == NODE_STRING) {
+                        var->is_string = true;
+                        var->is_float = false;
+                        var->value.str_val = str_copy(nodes[i]->left->data.str_val);
+                    }
                 }
-                if (nodes[i]->data.export.alias) {
-                    printf(" alias=%s", nodes[i]->data.export.alias);
-                }
+                
+                var_count++;
+                printf("%s[CRITICAL FIX]%s Created variable: %s\n", COLOR_BRIGHT_GREEN, COLOR_RESET, nodes[i]->data.name);
             }
-            else if ((nodes[i]->type == NODE_CONST_DECL || nodes[i]->type == NODE_VAR_DECL) && 
-                     nodes[i]->data.name) {
-                printf(" (VAR/CONST: %s)", nodes[i]->data.name);
-            }
-            printf("\n");
         }
     }
+    
+    printf("%s[CRITICAL FIX]%s After direct registration: func_count=%d, var_count=%d\n", COLOR_BRIGHT_RED, COLOR_RESET, func_count, var_count);
     
     // 8. Exécuter les déclarations pour enregistrer les exports
     printf("%s[IMPORT DEBUG]%s Executing declarations to register exports...\n", COLOR_YELLOW, COLOR_RESET);
     
     for (int i = 0; i < node_count; i++) {
-        if (nodes[i] && (nodes[i]->type == NODE_EXPORT || 
-                         nodes[i]->type == NODE_FUNC || 
-                         nodes[i]->type == NODE_CONST_DECL || 
-                         nodes[i]->type == NODE_VAR_DECL)) {
-            printf("%s[IMPORT DEBUG]%s Executing node %d (type: %d)\n",
-                   COLOR_YELLOW, COLOR_RESET, i, nodes[i]->type);
+        if (nodes[i] && (nodes[i]->type == NODE_EXPORT || nodes[i]->type == NODE_FUNC || 
+                         nodes[i]->type == NODE_CONST_DECL || nodes[i]->type == NODE_VAR_DECL)) {
+            printf("%s[IMPORT DEBUG]%s Executing node %d (type: %d)\n", COLOR_YELLOW, COLOR_RESET, i, nodes[i]->type);
             execute(nodes[i]);
         }
     }
     
-    // 9. Enregistrer dans la base de données
-    register_import_simple(import_path, full_path, from_module);
+    // 9. Enregistrer dans la DB simple
+    if (import_count < 1000) {
+        ImportRecord* rec = &import_db[import_count];
+        rec->module_path = str_copy(import_path);
+        rec->resolved_path = str_copy(full_path);
+        rec->from_module = str_copy(from_module ? from_module : "");
+        rec->import_time = time(NULL);
+        rec->active = true;
+        import_count++;
+        printf("%s[DB]%s Registered import: %s\n", COLOR_GREEN, COLOR_RESET, import_path);
+    }
     
-    // 10. Collecter et enregistrer les nouveaux exports
-    printf("%s[IMPORT DEBUG]%s Collecting exports from module...\n", COLOR_YELLOW, COLOR_RESET);
-    
+    // 10. Enregistrer les exports dans la DB simple
     for (int i = old_export_count; i < export_count; i++) {
         ExportEntry* exp = &exports[i];
-        printf("%s[IMPORT DEBUG]%s Found export: %s (alias: %s)\n",
-               COLOR_GREEN, COLOR_RESET, 
-               exp->symbol ? exp->symbol : "NULL", 
-               exp->alias ? exp->alias : "NULL");
         
-        // Chercher la fonction ou constante correspondante dans l'AST
+        // Déterminer le type
+        const char* type = "unknown";
         for (int j = 0; j < node_count; j++) {
-            if (!nodes[j]) continue;
-            
-            // Pour les fonctions exportées
-            if (nodes[j]->type == NODE_FUNC && nodes[j]->data.name && 
-                exp->symbol && strcmp(nodes[j]->data.name, exp->symbol) == 0) {
-                
-                char* name_to_use = exp->alias ? exp->alias : exp->symbol;
-                printf("%s[IMPORT DEBUG]%s Registering function: %s -> %s\n",
-                       COLOR_GREEN, COLOR_RESET, exp->symbol, name_to_use);
-                
-                // Compter les paramètres
-                int param_count = 0;
-                ASTNode* param = nodes[j]->left;
-                while (param) {
-                    param_count++;
-                    param = param->right;
-                }
-                
-                // Enregistrer la fonction
-                registerFunction(name_to_use, nodes[j]->left, nodes[j]->right, param_count);
-                
-                // Enregistrer dans la DB
-                record_export_simple(import_path, exp->symbol, exp->alias, "function");
-                break;
-            }
-            
-            // Pour les constantes exportées
-            if ((nodes[j]->type == NODE_CONST_DECL || nodes[j]->type == NODE_VAR_DECL) && 
-                nodes[j]->data.name && exp->symbol && 
-                strcmp(nodes[j]->data.name, exp->symbol) == 0) {
-                
-                char* name_to_use = exp->alias ? exp->alias : exp->symbol;
-                printf("%s[IMPORT DEBUG]%s Creating constant: %s -> %s\n",
-                       COLOR_GREEN, COLOR_RESET, exp->symbol, name_to_use);
-                
-                // Créer une variable constante
-                if (var_count < 1000) {
-                    Variable* var = &vars[var_count];
-                    strncpy(var->name, name_to_use, 99);
-                    var->name[99] = '\0';
-                    var->type = (nodes[j]->type == NODE_CONST_DECL) ? TK_CONST : TK_VAR;
-                    var->scope_level = 0;
-                    var->is_constant = (nodes[j]->type == NODE_CONST_DECL);
-                    var->is_initialized = true;
-                    
-                    if (nodes[j]->left) {
-                        if (nodes[j]->left->type == NODE_INT) {
-                            var->is_float = false;
-                            var->is_string = false;
-                            var->value.int_val = nodes[j]->left->data.int_val;
-                        } else if (nodes[j]->left->type == NODE_FLOAT) {
-                            var->is_float = true;
-                            var->is_string = false;
-                            var->value.float_val = nodes[j]->left->data.float_val;
-                        } else if (nodes[j]->left->type == NODE_STRING) {
-                            var->is_string = true;
-                            var->is_float = false;
-                            var->value.str_val = str_copy(nodes[j]->left->data.str_val);
-                        } else if (nodes[j]->left->type == NODE_BOOL) {
-                            var->is_float = false;
-                            var->is_string = false;
-                            var->value.int_val = nodes[j]->left->data.bool_val ? 1 : 0;
-                        }
-                    }
-                    
-                    var_count++;
-                }
-                
-                // Enregistrer dans la DB
-                const char* type = (nodes[j]->type == NODE_CONST_DECL) ? "constant" : "variable";
-                record_export_simple(import_path, exp->symbol, exp->alias, type);
+            if (nodes[j] && nodes[j]->data.name && strcmp(nodes[j]->data.name, exp->symbol) == 0) {
+                if (nodes[j]->type == NODE_FUNC) type = "function";
+                else if (nodes[j]->type == NODE_CONST_DECL) type = "constant";
+                else if (nodes[j]->type == NODE_VAR_DECL) type = "variable";
                 break;
             }
         }
-    }
-    
-    // 11. Si import nommé, vérifier que les symboles demandés sont disponibles
-    if (import_named && named_symbols) {
-        printf("%s[IMPORT DEBUG]%s Checking named imports...\n", COLOR_YELLOW, COLOR_RESET);
-        for (int i = 0; i < symbol_count; i++) {
-            if (!named_symbols[i]) continue;
-            
-            bool found = false;
-            for (int j = old_export_count; j < export_count; j++) {
-                if ((exports[j].symbol && strcmp(exports[j].symbol, named_symbols[i]) == 0) ||
-                    (exports[j].alias && strcmp(exports[j].alias, named_symbols[i]) == 0)) {
-                    found = true;
-                    break;
-                }
-            }
-            
-            if (!found) {
-                printf("%s[IMPORT WARNING]%s Requested symbol not found in module: %s\n",
-                       COLOR_YELLOW, COLOR_RESET, named_symbols[i]);
-            }
+        
+        // Enregistrer
+        if (export_count < 5000) {
+            ExportRecord* erec = &export_db[export_count];
+            erec->module_path = str_copy(import_path);
+            erec->symbol = str_copy(exp->symbol);
+            erec->alias = str_copy(exp->alias ? exp->alias : exp->symbol);
+            erec->symbol_type = str_copy(type);
+            erec->import_id = import_count - 1;
+            export_count++;
+            printf("%s[DB]%s Recorded export: %s.%s as %s\n", COLOR_GREEN, COLOR_RESET, 
+                   import_path, exp->symbol, exp->alias ? exp->alias : exp->symbol);
         }
     }
     
-    // 12. Exécuter le reste du code d'initialisation (non-déclarations)
-    printf("%s[IMPORT DEBUG]%s Executing module initialization code...\n",
-           COLOR_YELLOW, COLOR_RESET);
+    // 11. Exécuter le reste du code
+    printf("%s[IMPORT DEBUG]%s Executing module initialization code...\n", COLOR_YELLOW, COLOR_RESET);
     
     for (int i = 0; i < node_count; i++) {
-        if (nodes[i] && nodes[i]->type != NODE_EXPORT && 
-            nodes[i]->type != NODE_FUNC && 
-            nodes[i]->type != NODE_CONST_DECL && 
-            nodes[i]->type != NODE_VAR_DECL) {
-            
-            printf("%s[IMPORT DEBUG]%s Executing node %d (type: %d)\n",
-                   COLOR_YELLOW, COLOR_RESET, i, nodes[i]->type);
+        if (nodes[i] && nodes[i]->type != NODE_EXPORT && nodes[i]->type != NODE_FUNC && 
+            nodes[i]->type != NODE_CONST_DECL && nodes[i]->type != NODE_VAR_DECL) {
+            printf("%s[IMPORT DEBUG]%s Executing node %d (type: %d)\n", COLOR_YELLOW, COLOR_RESET, i, nodes[i]->type);
             execute(nodes[i]);
         }
     }
     
-    // DEBUG: Afficher l'état après import
-    printf("%s[IMPORT DEBUG]%s === STATE AFTER IMPORT ===\n", COLOR_RED, COLOR_RESET);
-    printf("%s[IMPORT DEBUG]%s Total functions: %d (new: %d)\n",
-           COLOR_RED, COLOR_RESET, func_count, func_count - old_func_count);
-    printf("%s[IMPORT DEBUG]%s Total variables: %d (new: %d)\n",
-           COLOR_RED, COLOR_RESET, var_count, var_count - old_var_count);
-    printf("%s[IMPORT DEBUG]%s Total exports: %d (new: %d)\n",
-           COLOR_RED, COLOR_RESET, export_count, export_count - old_export_count);
-    
-    // Afficher les nouvelles fonctions
-    for (int i = old_func_count; i < func_count; i++) {
-        printf("%s[IMPORT DEBUG]%s New function %d: %s (%d params)\n",
-               COLOR_GREEN, COLOR_RESET, i - old_func_count, 
-               functions[i].name, functions[i].param_count);
-    }
-    
-    // Afficher les nouvelles variables
-    for (int i = old_var_count; i < var_count; i++) {
-        printf("%s[IMPORT DEBUG]%s New variable %d: %s\n",
-               COLOR_GREEN, COLOR_RESET, i - old_var_count, vars[i].name);
-    }
-    
-    // 13. Restaurer l'état
+    // 12. Restaurer l'état
     strncpy(current_working_dir, old_dir, PATH_MAX);
-    printf("%s[IMPORT DEBUG]%s Working directory restored: %s\n",
-           COLOR_YELLOW, COLOR_RESET, current_working_dir);
+    printf("%s[IMPORT DEBUG]%s Working directory restored: %s\n", COLOR_YELLOW, COLOR_RESET, current_working_dir);
     
-    // 14. Nettoyer
+    // 13. Nettoyer
     printf("%s[IMPORT DEBUG]%s Cleaning up AST nodes...\n", COLOR_YELLOW, COLOR_RESET);
     
     for (int i = 0; i < node_count; i++) {
         if (nodes[i]) {
-            // Libérer la mémoire des nœuds
-            if (nodes[i]->type == NODE_STRING && nodes[i]->data.str_val) {
-                free(nodes[i]->data.str_val);
-            }
-            if (nodes[i]->type == NODE_IDENT && nodes[i]->data.name) {
-                free(nodes[i]->data.name);
-            }
-            if (nodes[i]->type == NODE_FUNC && nodes[i]->data.name) {
-                free(nodes[i]->data.name);
-            }
+            if (nodes[i]->type == NODE_STRING && nodes[i]->data.str_val) free(nodes[i]->data.str_val);
+            if (nodes[i]->type == NODE_IDENT && nodes[i]->data.name) free(nodes[i]->data.name);
+            if (nodes[i]->type == NODE_FUNC && nodes[i]->data.name) free(nodes[i]->data.name);
             if (nodes[i]->type == NODE_EXPORT) {
                 if (nodes[i]->data.export.symbol) free(nodes[i]->data.export.symbol);
                 if (nodes[i]->data.export.alias) free(nodes[i]->data.export.alias);
@@ -986,14 +905,13 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     free(source);
     free(full_path);
     
-    printf("%s[IMPORT]%s Module import completed: %s\n", 
-           COLOR_GREEN, COLOR_RESET, import_path);
-    printf("%s[IMPORT DEBUG]%s Functions registered total: %d\n",
-           COLOR_GREEN, COLOR_RESET, func_count);
-    printf("%s[IMPORT DEBUG]%s Variables total: %d\n",
-           COLOR_GREEN, COLOR_RESET, var_count);
-    printf("%s[IMPORT DEBUG]%s Exports total: %d\n",
-           COLOR_GREEN, COLOR_RESET, export_count);
+    printf("%s[IMPORT]%s Module import completed: %s\n", COLOR_GREEN, COLOR_RESET, import_path);
+    printf("%s[IMPORT DEBUG]%s Functions registered: %d (new: %d)\n", COLOR_GREEN, COLOR_RESET, 
+           func_count, func_count - old_func_count);
+    printf("%s[IMPORT DEBUG]%s Variables: %d (new: %d)\n", COLOR_GREEN, COLOR_RESET, 
+           var_count, var_count - old_var_count);
+    printf("%s[IMPORT DEBUG]%s Exports: %d (new: %d)\n", COLOR_GREEN, COLOR_RESET, 
+           export_count, export_count - old_export_count);
     
     return true;
 }
