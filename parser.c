@@ -1773,7 +1773,7 @@ static ASTNode* variableDeclaration() {
         case TK_CLOG: node = newNode(NODE_CLOG_DECL); break;
         case TK_DOS: node = newNode(NODE_DOS_DECL); break;
         case TK_SEL: node = newNode(NODE_SEL_DECL); break;
-        case TK_LET: 
+        case TK_LET: node = newNode(NODE_LET); break; 
         case TK_CONST: node = newNode(NODE_CONST_DECL); break;
         case TK_GLOBAL: node = newNode(NODE_GLOBAL_DECL); break;
         default: node = newNode(NODE_VAR_DECL); break;
