@@ -256,6 +256,7 @@ typedef enum {
     NODE_TYPE,
     NODE_MAP,
     NODE_FUNC,
+    NODE_LET,
     NODE_FUNC_CALL,
     NODE_LAMBDA,
     NODE_ARRAY_ACCESS,
