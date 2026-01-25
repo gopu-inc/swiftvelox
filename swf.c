@@ -687,16 +687,17 @@ static double evalFloat(ASTNode* node) {
     switch (node->type) {
         
         case NODE_NET_SOCKET:
-            net_socket(node);
-            return (double)node->data.int_val; // Récupère le FD stocké par net.c
+            return (double)net_socket_create();
             
-        case NODE_NET_LISTEN:
-            net_listen(node);
-            return (double)node->data.int_val;
+        case NODE_NET_LISTEN: {
+            int port = (int)evalFloat(node->left); // Évaluation de la variable port
+            return (double)net_start_listen(port);
+        }
             
-        case NODE_NET_ACCEPT:
-            net_accept(node);
-            return (double)node->data.int_val;
+        case NODE_NET_ACCEPT: {
+            int server_fd = (int)evalFloat(node->left); // Évaluation de la variable server
+            return (double)net_accept_client(server_fd);
+        }
         case NODE_INT:
             return (double)node->data.int_val;
             
@@ -887,13 +888,15 @@ static char* evalString(ASTNode* node) {
     
     switch (node->type) {
         
-        case NODE_NET_RECV:
-            net_recv(node);
-            if (node->data.str_val) {
-                // Transfert de propriété de la string (attention aux fuites, ici simplifié)
-                return node->data.str_val; 
-            }
+        case NODE_NET_RECV: {
+            int fd = (int)evalFloat(node->left); // Évaluation du FD
+            int size = 1024;
+            if (node->right) size = (int)evalFloat(node->right);
+            
+            char* res = net_recv_data(fd, size);
+            if (res) return res;
             return str_copy("");
+        }
         case NODE_STRING:
             return str_copy(node->data.str_val);
             
@@ -1259,15 +1262,33 @@ static void execute(ASTNode* node) {
     break;
 }
         // net pour le command void
-        case NODE_NET_CONNECT:
-            net_connect(node);
+        case NODE_NET_CONNECT: {
+            int fd = (int)evalFloat(node->left);      // Évaluation variable sock
+            char* ip = evalString(node->right);       // Évaluation string ip
+            int port = (int)evalFloat(node->third);   // Évaluation int/var port
+            
+            net_connect_to(fd, ip, port);
+            
+            if (ip) free(ip);
             break;
-        case NODE_NET_SEND:
-            net_send(node);
+        }
+        case NODE_NET_SEND: {
+            int fd = (int)evalFloat(node->left);
+            char* data = evalString(node->right);
+            
+            net_send_data(fd, data);
+            
+            if (data) free(data);
             break;
-        case NODE_NET_CLOSE:
-            net_close(node);
+        }
+        case NODE_NET_CLOSE: {
+            int fd = (int)evalFloat(node->left);
+            net_close_socket(fd);
             break;
+        }
+
+
+        
         case NODE_VAR_DECL:
         case NODE_NET_DECL:
         case NODE_CLOG_DECL:
