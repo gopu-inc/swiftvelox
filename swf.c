@@ -669,13 +669,18 @@ static double evalFloat(ASTNode* node) {
     
     switch (node->type) {
         // cmd sys
+        // [FICHIER: swf.c] Amélioration NODE_SYS_EXEC dans evalFloat/execute
+
         case NODE_SYS_EXEC: {
             char* cmd = evalString(node->left);
-            // sys_exec_int est une nouvelle fonction dans sys.c qui retourne le int
-            // ou on adapte sys_exec pour retourner int
-            int res = system(cmd); 
+            printf("%s[CMD]%s Executing: %s\n", COLOR_YELLOW, COLOR_RESET, cmd);
+            
+            // Utiliser popen pour capturer la sortie si nécessaire
+            // Ici system() simple pour l'interpréteur
+            int result = system(cmd);
+            
             if (cmd) free(cmd);
-            return (double)res;
+            return (double)result;
         }
         case NODE_NET_SOCKET:
             return (double)net_socket_create();
