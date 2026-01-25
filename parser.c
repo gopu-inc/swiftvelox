@@ -2305,6 +2305,11 @@ static ASTNode* statement() {
         warningAt(previous, "printdb not implemented, using print");
         return printStatement();
     }
+    if (match(TK_IMPORTDB)) {
+        ASTNode* node = newNode(NODE_IMPORTDB);
+        consume(TK_SEMICOLON, "Expected ';' after importdb");
+         return node;
+    }
     if (match(TK_IO_OPEN)) return ioOpenStatement();
     if (match(TK_IO_CLOSE)) return ioCloseStatement();
     if (match(TK_IO_READ)) return ioReadStatement();
