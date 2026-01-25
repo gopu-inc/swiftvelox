@@ -1682,11 +1682,12 @@ case NODE_DIR_LIST:
 }
             
         case NODE_FUNC: {
-    // CORRECTION : Enregistrer la fonction ici !
-    if (node->data.name) {
-        printf("%s[EXECUTE FUNC]%s Registering function: %s\n", COLOR_MAGENTA, COLOR_RESET, node->data.name);
+    // Enregistrer la fonction SEULEMENT si on est dans le scope global
+    // et si ce n'est pas dans un module importé (géré par loadAndExecuteModule)
+    if (node->data.name && scope_level == 0) {
+        printf("%s[EXECUTE]%s Registering function: %s\n", 
+               COLOR_MAGENTA, COLOR_RESET, node->data.name);
         
-        // Compter les paramètres
         int param_count = 0;
         ASTNode* param = node->left;
         while (param) {
@@ -1694,12 +1695,7 @@ case NODE_DIR_LIST:
             param = param->right;
         }
         
-        printf("%s[EXECUT FUNC]%s   %d parameter(s)\n", COLOR_MAGENTA, COLOR_RESET, param_count);
-        
-        // Enregistrer la fonction
         registerFunction(node->data.name, node->left, node->right, param_count);
-    } else {
-        printf("%s[EXECUTE FUNC ERROR]%s Function without name!\n", COLOR_RED, COLOR_RESET);
     }
     break;
 }
