@@ -22,6 +22,11 @@
 #include <fcntl.h>  
 #include "common.h"
 
+
+// [FICHIER: swf.c] Variables globales
+static char* runtime_exception = NULL; // NULL = pas d'erreur}
+
+
 // ======================================================
 // [SECTION] GLOBAL STATE
 // ======================================================
@@ -1283,20 +1288,110 @@ static char* weldInput(const char* prompt) {
 static void execute(ASTNode* node) {
     if (!node) return;
     
-    switch (node->type) {
-        // Dans execute, ajoute :
+    switch (node->type) 
+    
+
+        case NODE_THROW: {
+            char* msg = evalString(node->left);
+            if (runtime_exception) free(runtime_exception);
+            runtime_exception = msg; // Lève l'exception
+            printf("%s[THROW]%s %s\n", COLOR_RED, COLOR_RESET, msg);
+            break;
+        }
+
+        case NODE_TRY: {
+            execute(node->data.try_catch.try_block);
+            
+            // Si une exception a été levée pendant l'exécution du bloc try
+            if (runtime_exception) {
+                if (node->data.try_catch.catch_block) {
+                    // On injecte la variable d'erreur (ex: catch(e))
+                    if (node->data.try_catch.error_var) {
+                        // Créer variable e = runtime_exception
+                        if (var_count < 1000) {
+                            Variable* var = &vars[var_count++];
+                            strcpy(var->name, node->data.try_catch.error_var);
+                            var->type = TK_VAR;
+                            var->is_string = true;
+                            var->value.str_val = strdup(runtime_exception);
+                        }
+                    }
+                    
+                    // On consomme l'erreur et on exécute le catch
+                    free(runtime_exception);
+                    runtime_exception = NULL; 
+                    execute(node->data.try_catch.catch_block);
+                } else {
+                    // Pas de catch ? On laisse l'erreur remonter (ne rien faire)
+                }
+            }
+            break;
+        
+        case NODE_NEW: {
+            // Création d'une instance (Objet simple pour l'instant)
+            // On crée un scope spécial pour l'objet
+            printf("%s[OBJ]%s Creating instance of %s\n", COLOR_CYAN, COLOR_RESET, node->data.name);
+            
+            // Trouver la classe
+            Class* cls = NULL;
+            for(int i=0; i<class_count; i++) {
+                if(strcmp(classes[i].name, node->data.name) == 0) {
+                    cls = &classes[i]; break;
+                }
+            }
+            
+            if(!cls) {
+                printf("%s[ERROR]%s Class not found: %s\n", COLOR_RED, COLOR_RESET, node->data.name);
+                return;
+            }
+            
+            // Exécuter le constructeur si présent (méthode init)
+            // Note: Pour un interpréteur simple, on retourne souvent un ID d'objet ou on stocke les propriétés
+            // sous forme de variables préfixées (ex: instance1_property)
+            break;
+        }
+
+        case NODE_MEMBER_ACCESS: {
+            // Gestion de objet.propriete
+            // Si c'est un module aliasé (ex: web.tag), on transforme en web_tag
+            ASTNode* left = node->left;
+            ASTNode* right = node->right;
+            
+            if (left->type == NODE_IDENT && right->type == NODE_IDENT) {
+                char func_name[256];
+                snprintf(func_name, 256, "%s_%s", left->data.name, right->data.name);
+                
+                // On vérifie si c'est une fonction importée avec alias
+                Function* f = findFunction(func_name);
+                if (f) {
+                    // On modifie le nœud pour qu'il devienne un appel de fonction normal
+                    // C'est un "rewrite" de l'AST à la volée
+                    node->type = NODE_IDENT;
+                    if (node->data.name) free(node->data.name);
+                    node->data.name = strdup(func_name);
+                    // L'exécution continuera comme un IDENT normal
+                }
+            }
+            break;
+        }
         case NODE_SYS_EXIT: {
             int code = 0;
             if (node->left) code = (int)evalFloat(node->left);
             exit(code);
             break;
         }
+        // [FICHIER: swf.c] Amélioration NODE_SYS_EXEC dans evalFloat/execute
+
         case NODE_SYS_EXEC: {
-             // Si utilisé comme instruction simple sans récupération de variable
-             char* cmd = evalString(node->left);
-             system(cmd);
-             if (cmd) free(cmd);
-             break;
+            char* cmd = evalString(node->left);
+            printf("%s[CMD]%s Executing: %s\n", COLOR_YELLOW, COLOR_RESET, cmd);
+            
+            // Utiliser popen pour capturer la sortie si nécessaire
+            // Ici system() simple pour l'interpréteur
+            int result = system(cmd);
+            
+            if (cmd) free(cmd);
+            return (double)result;
         }
         case NODE_EXPORT: {
     printf("%s[EXECUTE EXPORT]%s Processing export\n", COLOR_MAGENTA, COLOR_RESET);
