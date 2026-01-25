@@ -483,23 +483,49 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
         }
     } else {
         // Import complet: charger tout le module
-        for (int i = 0; i < count; i++) {
-            if (nodes[i] && nodes[i]->type == NODE_FUNC) {
-                // Enregistrer avec namespace: module.func
-                char prefixed_name[200];
-                snprintf(prefixed_name, sizeof(prefixed_name), "%s.%s", 
-                         module_name, nodes[i]->data.name);
+        // Traiter les constantes/variables exportées
+for (int i = 0; i < count; i++) {
+    if (nodes[i] && nodes[i]->type == NODE_EXPORT) {
+        // Chercher si c'est une constante
+        for (int j = 0; j < count; j++) {
+            if ((nodes[j]->type == NODE_CONST_DECL || 
+                 nodes[j]->type == NODE_VAR_DECL) &&
+                nodes[j]->data.name && 
+                strcmp(nodes[j]->data.name, nodes[i]->data.export.symbol) == 0) {
                 
-                int param_count = 0;
-                ASTNode* param = nodes[i]->left;
-                while (param) {
-                    param_count++;
-                    param = param->right;
+                // Créer la variable dans le scope courant
+                if (var_count < 1000) {
+                    Variable* var = &vars[var_count];
+                    char* var_name = nodes[i]->data.export.alias ? 
+                                    nodes[i]->data.export.alias : 
+                                    nodes[i]->data.export.symbol;
+                    
+                    strncpy(var->name, var_name, 99);
+                    var->name[99] = '\0';
+                    var->type = TK_CONST;
+                    var->scope_level = 0; // Scope global
+                    var->is_constant = true;
+                    var->is_initialized = true;
+                    
+                    // Copier la valeur (simplifié - tu devras adapter)
+                    if (nodes[j]->left) {
+                        if (nodes[j]->left->type == NODE_FLOAT) {
+                            var->is_float = true;
+                            var->is_string = false;
+                            var->value.float_val = nodes[j]->left->data.float_val;
+                        } else if (nodes[j]->left->type == NODE_STRING) {
+                            var->is_string = true;
+                            var->is_float = false;
+                            var->value.str_val = str_copy(nodes[j]->left->data.str_val);
+                        }
+                    }
+                    
+                    var_count++;
+                    printf("%s[IMPORT]%s Importé constante: %s\n", 
+                           COLOR_GREEN, COLOR_RESET, var_name);
                 }
-                registerFunction(prefixed_name, nodes[i]->left, 
-                               nodes[i]->right, param_count);
+                break;
             }
-        }
         
         // Exécuter le code du module (sauf fonctions)
         for (int i = 0; i < count; i++) {
