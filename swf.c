@@ -16,16 +16,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>  
 #include "common.h"
-#include <sqlite3.h>
-#include <time.h>
 
-#define USE_SQLITE
-// ======================================================
-// [SECTION] IMPORT DATABASE GLOBALS
-// ======================================================
-static sqlite3* import_db = NULL;
-static bool db_initialized = false;
-static char* db_path = "swift_imports.db";
 // ======================================================
 // [SECTION] GLOBAL STATE
 // ======================================================
@@ -160,30 +151,6 @@ typedef struct {
 
 static FileHandle open_files[50];
 static int file_count = 0;
-
-// ======================================================
-// [SECTION] SIMPLE IMPORT DATABASE STRUCTURES
-// ======================================================
-typedef struct {
-    char* module_path;
-    char* resolved_path;
-    char* from_module;
-    time_t import_time;
-    bool active;
-} ImportRecord;
-
-typedef struct {
-    char* module_path;
-    char* symbol;
-    char* alias;
-    char* symbol_type;
-    int import_id;
-} ExportRecord;
-
-static ImportRecord import_db[1000];
-static ExportRecord export_db[5000];
-static int import_count = 0;
-static int export_count_simple = 0;
 
 // ======================================================
 // [SECTION] FUNCTION DECLARATIONS
@@ -395,306 +362,48 @@ static char* resolveModulePath(const char* import_path, const char* from_module)
     free(resolved);
     return NULL;
 }
-// ======================================================
-// [SECTION] IMPORT DATABASE FUNCTIONS
-// ======================================================
 
-static bool init_import_db() {
-    if (db_initialized && import_db) return true;
-    
-    int rc = sqlite3_open(db_path, &import_db);
-    if (rc != SQLITE_OK) {
-        printf("%s[DB ERROR]%s Cannot open database: %s\n", 
-               COLOR_RED, COLOR_RESET, sqlite3_errmsg(import_db));
-        import_db = NULL;
-        return false;
-    }
-    
-    // Créer les tables si elles n'existent pas
-    const char* create_tables = 
-        "CREATE TABLE IF NOT EXISTS imports ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "module_path TEXT NOT NULL,"
-        "resolved_path TEXT NOT NULL,"
-        "from_module TEXT,"
-        "import_time INTEGER NOT NULL,"
-        "UNIQUE(module_path, from_module)"
-        ");"
-        "CREATE TABLE IF NOT EXISTS exports ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "module_path TEXT NOT NULL,"
-        "symbol TEXT NOT NULL,"
-        "alias TEXT,"
-        "symbol_type TEXT NOT NULL,"  // 'function', 'constant', 'variable', etc.
-        "import_id INTEGER,"
-        "FOREIGN KEY(import_id) REFERENCES imports(id),"
-        "UNIQUE(module_path, symbol)"
-        ");"
-        "CREATE INDEX IF NOT EXISTS idx_imports_path ON imports(module_path);"
-        "CREATE INDEX IF NOT EXISTS idx_exports_module ON exports(module_path);"
-        "CREATE INDEX IF NOT EXISTS idx_exports_symbol ON exports(symbol);";
-    
-    char* err_msg = NULL;
-    rc = sqlite3_exec(import_db, create_tables, NULL, NULL, &err_msg);
-    
-    if (rc != SQLITE_OK) {
-        printf("%s[DB ERROR]%s Cannot create tables: %s\n", 
-               COLOR_RED, COLOR_RESET, err_msg);
-        sqlite3_free(err_msg);
-        sqlite3_close(import_db);
-        import_db = NULL;
-        return false;
-    }
-    
-    db_initialized = true;
-    printf("%s[DB]%s Import database initialized: %s\n", 
-           COLOR_GREEN, COLOR_RESET, db_path);
-    return true;
-}
-
-static void close_import_db() {
-    if (import_db) {
-        sqlite3_close(import_db);
-        import_db = NULL;
-    }
-    db_initialized = false;
-    printf("%s[DB]%s Import database closed\n", COLOR_GREEN, COLOR_RESET);
-}
-
-static bool record_export(const char* module_path, const char* symbol, 
-                         const char* alias, const char* symbol_type) {
-    if (!init_import_db()) return false;
-    
-    // Obtenir l'ID de l'import
-    sqlite3_stmt* stmt;
-    const char* get_import_sql = 
-        "SELECT id FROM imports WHERE module_path = ? ORDER BY import_time DESC LIMIT 1";
-    
-    int rc = sqlite3_prepare_v2(import_db, get_import_sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK) return false;
-    
-    sqlite3_bind_text(stmt, 1, module_path, -1, SQLITE_STATIC);
-    
-    int import_id = -1;
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
-        import_id = sqlite3_column_int(stmt, 0);
-    }
-    sqlite3_finalize(stmt);
-    
-    if (import_id == -1) {
-        printf("%s[DB WARNING]%s No import record found for: %s\n", 
-               COLOR_YELLOW, COLOR_RESET, module_path);
-        return false;
-    }
-    
-    // Insérer l'export
-    const char* insert_sql = 
-        "INSERT OR REPLACE INTO exports (module_path, symbol, alias, symbol_type, import_id) "
-        "VALUES (?, ?, ?, ?, ?)";
-    
-    rc = sqlite3_prepare_v2(import_db, insert_sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK) return false;
-    
-    sqlite3_bind_text(stmt, 1, module_path, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, symbol, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, alias ? alias : symbol, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 4, symbol_type, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 5, import_id);
-    
-    rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    
-    if (rc != SQLITE_DONE) {
-        printf("%s[DB ERROR]%s Failed to record export: %s.%s\n", 
-               COLOR_RED, COLOR_RESET, module_path, symbol);
-        return false;
-    }
-    
-    printf("%s[DB]%s Recorded export: %s.%s as %s\n", 
-           COLOR_GREEN, COLOR_RESET, module_path, symbol, alias ? alias : symbol);
-    return true;
-}
-
-static bool is_module_imported(const char* module_path, const char* from_module) {
-    if (!init_import_db()) return false;
-    
-    sqlite3_stmt* stmt;
-    const char* sql = "SELECT 1 FROM imports WHERE module_path = ? AND from_module = ?";
-    
-    int rc = sqlite3_prepare_v2(import_db, sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK) return false;
-    
-    sqlite3_bind_text(stmt, 1, module_path, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, from_module ? from_module : "", -1, SQLITE_STATIC);
-    
-    bool imported = (sqlite3_step(stmt) == SQLITE_ROW);
-    sqlite3_finalize(stmt);
-    
-    return imported;
-}
-
-static void show_import_db() {
-    if (!init_import_db()) {
-        printf("%s[DB ERROR]%s Database not initialized\n", COLOR_RED, COLOR_RESET);
-        return;
-    }
-    
-    printf("\n%s╔════════════════════════════════════════════════════════════════╗%s\n", 
-           COLOR_CYAN, COLOR_RESET);
-    printf("%s║                    IMPORT DATABASE (importdb)                  ║%s\n", 
-           COLOR_CYAN, COLOR_RESET);
-    printf("%s╠════════════════════════════════════════════════════════════════╣%s\n", 
-           COLOR_CYAN, COLOR_RESET);
-    
-    // Afficher les imports
-    printf("%s║                           IMPORTS                               ║%s\n", 
-           COLOR_CYAN, COLOR_RESET);
-    printf("%s╠════════════════════════════════════════════════════════════════╣%s\n", 
-           COLOR_CYAN, COLOR_RESET);
-    
-    sqlite3_stmt* stmt;
-    const char* import_sql = 
-        "SELECT module_path, resolved_path, from_module, "
-        "datetime(import_time, 'unixepoch') as import_time "
-        "FROM imports ORDER BY import_time DESC";
-    
-    int rc = sqlite3_prepare_v2(import_db, import_sql, -1, &stmt, NULL);
-    if (rc == SQLITE_OK) {
-        int count = 0;
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            count++;
-            const char* module = (const char*)sqlite3_column_text(stmt, 0);
-            const char* resolved = (const char*)sqlite3_column_text(stmt, 1);
-            const char* from = (const char*)sqlite3_column_text(stmt, 2);
-            const char* import_time = (const char*)sqlite3_column_text(stmt, 3);
-            
-            printf("%s║ %-30s → %-30s ║%s\n", COLOR_CYAN, module, resolved, COLOR_RESET);
-            printf("%s║   From: %-20s  Time: %-19s ║%s\n", 
-                   COLOR_CYAN, from[0] ? from : "(main)", import_time, COLOR_RESET);
-            printf("%s║                                                          ║%s\n",
-                   COLOR_CYAN, COLOR_RESET);
-        }
-        
-        if (count == 0) {
-            printf("%s║                   No imports recorded                     ║%s\n", 
-                   COLOR_CYAN, COLOR_RESET);
-        }
-        sqlite3_finalize(stmt);
-    }
-    
-    // Afficher les exports
-    printf("%s╠════════════════════════════════════════════════════════════════╣%s\n", 
-           COLOR_CYAN, COLOR_RESET);
-    printf("%s║                           EXPORTS                               ║%s\n", 
-           COLOR_CYAN, COLOR_RESET);
-    printf("%s╠════════════════════════════════════════════════════════════════╣%s\n", 
-           COLOR_CYAN, COLOR_RESET);
-    
-    const char* export_sql = 
-        "SELECT e.module_path, e.symbol, e.alias, e.symbol_type, "
-        "datetime(i.import_time, 'unixepoch') as import_time "
-        "FROM exports e LEFT JOIN imports i ON e.import_id = i.id "
-        "ORDER BY e.module_path, e.symbol";
-    
-    rc = sqlite3_prepare_v2(import_db, export_sql, -1, &stmt, NULL);
-    if (rc == SQLITE_OK) {
-        int count = 0;
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            count++;
-            const char* module = (const char*)sqlite3_column_text(stmt, 0);
-            const char* symbol = (const char*)sqlite3_column_text(stmt, 1);
-            const char* alias = (const char*)sqlite3_column_text(stmt, 2);
-            const char* type = (const char*)sqlite3_column_text(stmt, 3);
-            const char* import_time = (const char*)sqlite3_column_text(stmt, 4);
-            
-            const char* color = COLOR_CYAN;
-            if (strcmp(type, "function") == 0) color = COLOR_GREEN;
-            else if (strcmp(type, "constant") == 0) color = COLOR_YELLOW;
-            else if (strcmp(type, "variable") == 0) color = COLOR_BLUE;
-            
-            printf("%s║ %s%-10s%s %-15s → %-15s (from %-20s) ║%s\n", 
-                   COLOR_CYAN, color, type, COLOR_CYAN, 
-                   symbol, alias, module, COLOR_RESET);
-        }
-        
-        if (count == 0) {
-            printf("%s║          No exports record  ║%s\n", 
-                   COLOR_CYAN, COLOR_RESET);
-        }
-        sqlite3_finalize(stmt);
-    }
-    
-    printf("%s╚══════════════════════════════════════════════╝%s\n", 
-           COLOR_CYAN, COLOR_RESET);
-    printf("\n");
-}
-
-static void clear_import_db() {
-    if (!init_import_db()) return;
-    
-    const char* clear_sql = "DELETE FROM imports; DELETE FROM exports;";
-    char* err_msg = NULL;
-    
-    int rc = sqlite3_exec(import_db, clear_sql, NULL, NULL, &err_msg);
-    if (rc != SQLITE_OK) {
-        printf("%s[DB ERROR]%s Failed to clear database: %s\n", 
-               COLOR_RED, COLOR_RESET, err_msg);
-        sqlite3_free(err_msg);
-    } else {
-        printf("%s[DB]%s Import database cleared\n", COLOR_GREEN, COLOR_RESET);
-    }
-}
 // ======================================================
 // [SECTION] FONCTION D'IMPORT - MODIFIÉE
 // ======================================================
 static bool loadAndExecuteModule(const char* import_path, const char* from_module, 
                                  bool import_named, char** named_symbols, int symbol_count) {
-    printf("\n%s-%s\n", COLOR_BRIGHT_RED, COLOR_RESET);
-    printf("%s>>> LOAD AND EXEC MODULE: %s <<<%s\n", COLOR_BRIGHT_RED, COLOR_RESET, import_path);
-    printf("%s-%s\n\n", COLOR_BRIGHT_RED, COLOR_RESET);
+    printf("\n%s-%s\n", 
+           COLOR_BRIGHT_RED, COLOR_RESET);
+    printf("%s>>> LOAD AND EXEC MODULE: %s <<<%s\n", 
+           COLOR_BRIGHT_RED, COLOR_RESET, import_path);
+    printf("%s-%s\n\n", 
+           COLOR_BRIGHT_RED, COLOR_RESET);
     
-    // 1. Résoudre le chemin
+    // 1. Résoudre le chemin du module
     char* full_path = resolveModulePath(import_path, from_module);
     if (!full_path) {
-        printf("%s[IMPORT ERROR]%s Cannot resolve module path: %s\n", COLOR_RED, COLOR_RESET, import_path);
+        printf("%s[IMPORT ERROR]%s Cannot resolve module path: %s\n", 
+               COLOR_RED, COLOR_RESET, import_path);
         return false;
     }
     
-    printf("%s[IMPORT DEBUG]%s Resolved path: %s\n", COLOR_YELLOW, COLOR_RESET, full_path);
+    printf("%s[IMPORT DEBUG]%s Resolved path: %s\n", 
+           COLOR_YELLOW, COLOR_RESET, full_path);
     
-    // 2. Vérifier si déjà importé
-    bool already_imported = false;
-    for (int i = 0; i < import_count; i++) {
-        if (import_db[i].active && 
-            strcmp(import_db[i].module_path, import_path) == 0 &&
-            strcmp(import_db[i].from_module, from_module ? from_module : "") == 0) {
-            already_imported = true;
-            break;
-        }
-    }
-    
-    if (already_imported) {
-        printf("%s[IMPORT INFO]%s Module already imported: %s\n", COLOR_YELLOW, COLOR_RESET, import_path);
-        free(full_path);
-        return true;
-    }
-    
-    // 3. Ouvrir le fichier
+    // 2. Ouvrir le fichier
     FILE* f = fopen(full_path, "r");
     if (!f) {
-        printf("%s[IMPORT ERROR]%s Cannot open file: %s\n", COLOR_RED, COLOR_RESET, full_path);
+        printf("%s[IMPORT ERROR]%s Cannot open file: %s\n", 
+               COLOR_RED, COLOR_RESET, full_path);
         free(full_path);
         return false;
     }
     
-    // 4. Lire le fichier
+    // 3. Lire le fichier
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
     
     char* source = malloc(size + 1);
     if (!source) {
-        printf("%s[IMPORT ERROR]%s Memory allocation failed\n", COLOR_RED, COLOR_RESET);
+        printf("%s[IMPORT ERROR]%s Memory allocation failed\n", 
+               COLOR_RED, COLOR_RESET);
         fclose(f);
         free(full_path);
         return false;
@@ -704,9 +413,10 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     source[size] = '\0';
     fclose(f);
     
-    printf("%s[IMPORT DEBUG]%s File read: %ld bytes\n", COLOR_YELLOW, COLOR_RESET, size);
+    printf("%s[IMPORT DEBUG]%s File read: %ld bytes\n", 
+           COLOR_YELLOW, COLOR_RESET, size);
     
-    // 5. Sauvegarder l'état
+    // 4. Sauvegarder l'état actuel
     char old_dir[PATH_MAX];
     strncpy(old_dir, current_working_dir, PATH_MAX);
     
@@ -715,14 +425,13 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     char* dir = dirname(module_dir);
     strncpy(current_working_dir, dir, PATH_MAX);
     
-    printf("%s[IMPORT DEBUG]%s Working directory changed: %s -> %s\n", COLOR_YELLOW, COLOR_RESET, old_dir, current_working_dir);
+    printf("%s[IMPORT DEBUG]%s Working directory changed: %s -> %s\n", 
+           COLOR_YELLOW, COLOR_RESET, old_dir, current_working_dir);
     
-    // 6. Sauvegarder les compteurs avant
+    // 5. Sauvegarder les exports existants AVANT l'import
     int old_export_count = export_count;
-    int old_func_count = func_count;
-    int old_var_count = var_count;
     
-    // 7. Parser le module
+    // 6. Parser le module
     printf("%s[IMPORT DEBUG]%s Parsing module...\n", COLOR_YELLOW, COLOR_RESET);
     int node_count = 0;
     ASTNode** nodes = parse(source, &node_count);
@@ -735,140 +444,145 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
         return false;
     }
     
-    printf("%s[IMPORT DEBUG]%s Module parsed successfully: %d nodes\n", COLOR_GREEN, COLOR_RESET, node_count);
+    printf("%s[IMPORT DEBUG]%s Module parsed successfully: %d nodes\n", 
+           COLOR_GREEN, COLOR_RESET, node_count);
     
-    // === CRITICAL FIX: Register functions from parsed nodes ===
-    printf("%s[CRITICAL FIX]%s Searching for functions in %d nodes...\n", COLOR_BRIGHT_RED, COLOR_RESET, node_count);
+    // 7. Collecter les nouveaux exports créés par ce module
+    printf("%s[IMPORT DEBUG]%s Collecting exports from module...\n", COLOR_YELLOW, COLOR_RESET);
     
-    for (int i = 0; i < node_count; i++) {
-        if (nodes[i] && nodes[i]->type == NODE_FUNC && nodes[i]->data.name) {
-            printf("%s[CRITICAL FIX]%s Found function: %s\n", COLOR_BRIGHT_RED, COLOR_RESET, nodes[i]->data.name);
-            
-            // Compter les paramètres
-            int param_count = 0;
-            ASTNode* param = nodes[i]->left;
-            while (param) {
-                param_count++;
-                param = param->right;
-            }
-            
-            // Enregistrer la fonction directement
-            registerFunction(nodes[i]->data.name, nodes[i]->left, nodes[i]->right, param_count);
-            printf("%s[CRITICAL FIX]%s Registered function: %s (%d params)\n", COLOR_BRIGHT_GREEN, COLOR_RESET, nodes[i]->data.name, param_count);
-        }
-        
-        // Aussi chercher les constantes
-        if (nodes[i] && (nodes[i]->type == NODE_CONST_DECL || nodes[i]->type == NODE_VAR_DECL) && nodes[i]->data.name) {
-            printf("%s[CRITICAL FIX]%s Found variable: %s\n", COLOR_BRIGHT_RED, COLOR_RESET, nodes[i]->data.name);
-            
-            // Créer la variable directement
-            if (var_count < 1000) {
-                Variable* var = &vars[var_count];
-                strncpy(var->name, nodes[i]->data.name, 99);
-                var->name[99] = '\0';
-                var->type = (nodes[i]->type == NODE_CONST_DECL) ? TK_CONST : TK_VAR;
-                var->scope_level = 0;
-                var->is_constant = (nodes[i]->type == NODE_CONST_DECL);
-                var->is_initialized = true;
-                
-                if (nodes[i]->left) {
-                    if (nodes[i]->left->type == NODE_INT) {
-                        var->is_float = false;
-                        var->is_string = false;
-                        var->value.int_val = nodes[i]->left->data.int_val;
-                    } else if (nodes[i]->left->type == NODE_FLOAT) {
-                        var->is_float = true;
-                        var->is_string = false;
-                        var->value.float_val = nodes[i]->left->data.float_val;
-                    } else if (nodes[i]->left->type == NODE_STRING) {
-                        var->is_string = true;
-                        var->is_float = false;
-                        var->value.str_val = str_copy(nodes[i]->left->data.str_val);
-                    }
-                }
-                
-                var_count++;
-                printf("%s[CRITICAL FIX]%s Created variable: %s\n", COLOR_BRIGHT_GREEN, COLOR_RESET, nodes[i]->data.name);
-            }
-        }
-    }
-    
-    printf("%s[CRITICAL FIX]%s After direct registration: func_count=%d, var_count=%d\n", COLOR_BRIGHT_RED, COLOR_RESET, func_count, var_count);
-    
-    // 8. Exécuter les exports pour les enregistrer
-    printf("%s[IMPORT DEBUG]%s Executing exports...\n", COLOR_YELLOW, COLOR_RESET);
-    
-    for (int i = 0; i < node_count; i++) {
-        if (nodes[i] && nodes[i]->type == NODE_EXPORT) {
-            printf("%s[IMPORT DEBUG]%s Executing export node %d\n", COLOR_YELLOW, COLOR_RESET, i);
-            execute(nodes[i]);
-        }
-    }
-    
-    // 9. Enregistrer dans la DB simple
-    if (import_count < 1000) {
-        ImportRecord* rec = &import_db[import_count];
-        rec->module_path = str_copy(import_path);
-        rec->resolved_path = str_copy(full_path);
-        rec->from_module = str_copy(from_module ? from_module : "");
-        rec->import_time = time(NULL);
-        rec->active = true;
-        import_count++;
-        printf("%s[DB SIMPLE]%s Registered import: %s\n", COLOR_GREEN, COLOR_RESET, import_path);
-    }
-    
-    // 10. Enregistrer les exports dans la DB simple
     for (int i = old_export_count; i < export_count; i++) {
         ExportEntry* exp = &exports[i];
+        printf("%s[IMPORT DEBUG]%s Found export: %s (alias: %s)\n",
+               COLOR_GREEN, COLOR_RESET, 
+               exp->symbol ? exp->symbol : "NULL", 
+               exp->alias ? exp->alias : "NULL");
         
-        if (export_count_simple < 5000) {
-            ExportRecord* erec = &export_db[export_count_simple];
-            erec->module_path = str_copy(import_path);
-            erec->symbol = str_copy(exp->symbol);
-            erec->alias = str_copy(exp->alias ? exp->alias : exp->symbol);
+        // Chercher la fonction ou constante correspondante dans l'AST
+        for (int j = 0; j < node_count; j++) {
+            if (!nodes[j]) continue;
             
-            // Déterminer le type
-            const char* type = "unknown";
-            for (int j = 0; j < node_count; j++) {
-                if (nodes[j] && nodes[j]->data.name && strcmp(nodes[j]->data.name, exp->symbol) == 0) {
-                    if (nodes[j]->type == NODE_FUNC) type = "function";
-                    else if (nodes[j]->type == NODE_CONST_DECL) type = "constant";
-                    else if (nodes[j]->type == NODE_VAR_DECL) type = "variable";
+            // Pour les fonctions exportées
+            if (nodes[j]->type == NODE_FUNC && nodes[j]->data.name && 
+                exp->symbol && strcmp(nodes[j]->data.name, exp->symbol) == 0) {
+                
+                char* name_to_use = exp->alias ? exp->alias : exp->symbol;
+                printf("%s[IMPORT DEBUG]%s Registering function: %s -> %s\n",
+                       COLOR_GREEN, COLOR_RESET, exp->symbol, name_to_use);
+                
+                // Compter les paramètres
+                int param_count = 0;
+                ASTNode* param = nodes[j]->left;
+                while (param) {
+                    param_count++;
+                    param = param->right;
+                }
+                
+                // Enregistrer la fonction
+                registerFunction(name_to_use, nodes[j]->left, nodes[j]->right, param_count);
+                break;
+            }
+            
+            // Pour les constantes exportées
+            if (nodes[j]->type == NODE_CONST_DECL && nodes[j]->data.name && 
+                exp->symbol && strcmp(nodes[j]->data.name, exp->symbol) == 0) {
+                
+                char* name_to_use = exp->alias ? exp->alias : exp->symbol;
+                printf("%s[IMPORT DEBUG]%s Creating constant: %s -> %s\n",
+                       COLOR_GREEN, COLOR_RESET, exp->symbol, name_to_use);
+                
+                // Créer une variable constante
+                if (var_count < 1000) {
+                    Variable* var = &vars[var_count];
+                    strncpy(var->name, name_to_use, 99);
+                    var->name[99] = '\0';
+                    var->type = TK_CONST;
+                    var->scope_level = 0;
+                    var->is_constant = true;
+                    var->is_initialized = true;
+                    
+                    if (nodes[j]->left) {
+                        if (nodes[j]->left->type == NODE_INT) {
+                            var->is_float = false;
+                            var->is_string = false;
+                            var->value.int_val = nodes[j]->left->data.int_val;
+                        } else if (nodes[j]->left->type == NODE_FLOAT) {
+                            var->is_float = true;
+                            var->is_string = false;
+                            var->value.float_val = nodes[j]->left->data.float_val;
+                        } else if (nodes[j]->left->type == NODE_STRING) {
+                            var->is_string = true;
+                            var->is_float = false;
+                            var->value.str_val = str_copy(nodes[j]->left->data.str_val);
+                        } else if (nodes[j]->left->type == NODE_BOOL) {
+                            var->is_float = false;
+                            var->is_string = false;
+                            var->value.int_val = nodes[j]->left->data.bool_val ? 1 : 0;
+                        }
+                    }
+                    
+                    var_count++;
+                }
+                break;
+            }
+        }
+    }
+    
+    // 8. Si import nommé, vérifier que les symboles demandés sont disponibles
+    if (import_named && named_symbols) {
+        for (int i = 0; i < symbol_count; i++) {
+            if (!named_symbols[i]) continue;
+            
+            bool found = false;
+            for (int j = old_export_count; j < export_count; j++) {
+                if ((exports[j].symbol && strcmp(exports[j].symbol, named_symbols[i]) == 0) ||
+                    (exports[j].alias && strcmp(exports[j].alias, named_symbols[i]) == 0)) {
+                    found = true;
                     break;
                 }
             }
             
-            erec->symbol_type = str_copy(type);
-            erec->import_id = import_count - 1;
-            export_count_simple++;
-            printf("%s[DB SIMPLE]%s Recorded export: %s.%s as %s\n", COLOR_GREEN, COLOR_RESET, 
-                   import_path, exp->symbol, exp->alias ? exp->alias : exp->symbol);
+            if (!found) {
+                printf("%s[IMPORT WARNING]%s Requested symbol not found in module: %s\n",
+                       COLOR_YELLOW, COLOR_RESET, named_symbols[i]);
+            }
         }
     }
     
-    // 11. Exécuter le reste du code
-    printf("%s[IMPORT DEBUG]%s Executing module initialization code...\n", COLOR_YELLOW, COLOR_RESET);
+    // 9. Exécuter le code d'initialisation du module (sauf fonctions)
+    printf("%s[IMPORT DEBUG]%s Executing module initialization code...\n",
+           COLOR_YELLOW, COLOR_RESET);
     
     for (int i = 0; i < node_count; i++) {
-        if (nodes[i] && nodes[i]->type != NODE_EXPORT && nodes[i]->type != NODE_FUNC && 
-            nodes[i]->type != NODE_CONST_DECL && nodes[i]->type != NODE_VAR_DECL) {
+        if (nodes[i] && nodes[i]->type != NODE_FUNC) {
+            printf("%s[IMPORT DEBUG]%s Executing node %d (type: %d)\n",
+                   COLOR_YELLOW, COLOR_RESET, i, nodes[i]->type);
             execute(nodes[i]);
         }
     }
     
-    // 12. Restaurer l'état
-    strncpy(current_working_dir, old_dir, PATH_MAX);
-    printf("%s[IMPORT DEBUG]%s Working directory restored: %s\n", COLOR_YELLOW, COLOR_RESET, current_working_dir);
+    // 10. Nettoyer les exports spécifiques à ce module (optionnel)
+    // Pour éviter la pollution, on peut les supprimer si on veut
+    // Mais gardons-les pour référence future
     
-    // 13. Nettoyer
+    // 11. Restaurer l'état
+    strncpy(current_working_dir, old_dir, PATH_MAX);
+    printf("%s[IMPORT DEBUG]%s Working directory restored: %s\n",
+           COLOR_YELLOW, COLOR_RESET, current_working_dir);
+    
+    // 12. Nettoyer
+    printf("%s[IMPORT DEBUG]%s Cleaning up AST nodes...\n", COLOR_YELLOW, COLOR_RESET);
+    
     for (int i = 0; i < node_count; i++) {
         if (nodes[i]) {
-            if (nodes[i]->type == NODE_STRING && nodes[i]->data.str_val) free(nodes[i]->data.str_val);
-            if (nodes[i]->type == NODE_IDENT && nodes[i]->data.name) free(nodes[i]->data.name);
-            if (nodes[i]->type == NODE_FUNC && nodes[i]->data.name) free(nodes[i]->data.name);
-            if (nodes[i]->type == NODE_EXPORT) {
-                if (nodes[i]->data.export.symbol) free(nodes[i]->data.export.symbol);
-                if (nodes[i]->data.export.alias) free(nodes[i]->data.export.alias);
+            // Libérer la mémoire des nœuds
+            if (nodes[i]->type == NODE_STRING && nodes[i]->data.str_val) {
+                free(nodes[i]->data.str_val);
+            }
+            if (nodes[i]->type == NODE_IDENT && nodes[i]->data.name) {
+                free(nodes[i]->data.name);
+            }
+            if (nodes[i]->type == NODE_FUNC && nodes[i]->data.name) {
+                free(nodes[i]->data.name);
             }
             free(nodes[i]);
         }
@@ -877,13 +591,14 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     free(source);
     free(full_path);
     
-    printf("%s[IMPORT]%s Module import completed: %s\n", COLOR_GREEN, COLOR_RESET, import_path);
-    printf("%s[IMPORT DEBUG]%s Functions registered: %d (new: %d)\n", COLOR_GREEN, COLOR_RESET, 
-           func_count, func_count - old_func_count);
-    printf("%s[IMPORT DEBUG]%s Variables: %d (new: %d)\n", COLOR_GREEN, COLOR_RESET, 
-           var_count, var_count - old_var_count);
-    printf("%s[IMPORT DEBUG]%s Exports: %d (new: %d)\n", COLOR_GREEN, COLOR_RESET, 
-           export_count, export_count - old_export_count);
+    printf("%s[IMPORT]%s Module import completed: %s\n", 
+           COLOR_GREEN, COLOR_RESET, import_path);
+    printf("%s[IMPORT DEBUG]%s Total functions registered: %d\n",
+           COLOR_GREEN, COLOR_RESET, func_count);
+    printf("%s[IMPORT DEBUG]%s Total variables: %d\n",
+           COLOR_GREEN, COLOR_RESET, var_count);
+    printf("%s[IMPORT DEBUG]%s Total exports: %d\n",
+           COLOR_GREEN, COLOR_RESET, export_count);
     
     return true;
 }
@@ -900,28 +615,6 @@ static bool isSymbolExported(const char* symbol, const char* module_path) {
     }
     return false;
 }
-// Enregistrer dans la base de données
-    register_import(import_path, full_path, from_module);
-    
-    // Enregistrer tous les exports dans la DB
-    for (int i = old_export_count; i < export_count; i++) {
-        ExportEntry* exp = &exports[i];
-        if (exp->symbol && strstr(exp->module, import_path)) {
-            // Déterminer le type
-            const char* type = "unknown";
-            for (int j = 0; j < node_count; j++) {
-                if (nodes[j] && nodes[j]->data.name && 
-                    strcmp(nodes[j]->data.name, exp->symbol) == 0) {
-                    if (nodes[j]->type == NODE_FUNC) type = "function";
-                    else if (nodes[j]->type == NODE_CONST_DECL) type = "constant";
-                    else if (nodes[j]->type == NODE_VAR_DECL) type = "variable";
-                    break;
-                }
-            }
-            
-            record_export(import_path, exp->symbol, exp->alias, type);
-        }
-    }
 
 // ======================================================
 // [SECTION] VERSION AND HELP FUNCTIONS
@@ -1531,9 +1224,7 @@ static void execute(ASTNode* node) {
     }
     break;
 }
-        case NODE_IMPORTDB:
-    show_import_db();
-    break;
+        
         case NODE_VAR_DECL:
         case NODE_NET_DECL:
         case NODE_CLOG_DECL:
@@ -2077,10 +1768,7 @@ static void repl() {
         if (!fgets(line, sizeof(line), stdin)) break;
         
         line[strcspn(line, "\n")] = 0;
-        if (strcmp(line, "importdb") == 0) {
-    show_import_db();
-    continue;
-}
+        
         if (strcmp(line, "exit") == 0) break;
         if (strcmp(line, "quit") == 0) break;
         if (strcmp(line, "clear") == 0) {
@@ -2147,7 +1835,6 @@ static char* loadFile(const char* filename) {
 int main(int argc, char* argv[]) {
     srand(time(NULL));
     init_io_module();
-    init_import_db();
     // Handle command line arguments
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
@@ -2181,6 +1868,6 @@ int main(int argc, char* argv[]) {
         run(source, argv[1]);
         free(source);
     }
-    close_import_db();
+    
     return 0;
 }
