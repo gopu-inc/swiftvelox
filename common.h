@@ -41,7 +41,7 @@ typedef enum {
     TK_NULL, TK_UNDEFINED, TK_NAN, TK_INF,
     
     // Identifiers
-    TK_IDENT, TK_AS, TK_OF,
+    TK_IDENT, TK_AS, TK_OF, TK_IMPORTDB,
     
     // Operators
     TK_PLUS, TK_MINUS, TK_MULT, TK_DIV, TK_MOD,
@@ -179,6 +179,7 @@ static const Keyword keywords[] = {
     {"typelock", TK_TYPELOCK}, {"namespace", TK_NAMESPACE},
     
     // Types
+    {"importdb", TK_IMPORTDB},
     {"int", TK_TYPE_INT}, {"float", TK_TYPE_FLOAT}, {"string", TK_TYPE_STR},
     {"bool", TK_TYPE_BOOL}, {"char", TK_TYPE_CHAR}, {"void", TK_TYPE_VOID},
     {"any", TK_TYPE_ANY}, {"auto", TK_TYPE_AUTO}, {"unknown", TK_TYPE_UNKNOWN},
@@ -266,7 +267,7 @@ typedef enum {
     NODE_TERNARY,
     NODE_ASSIGN,
     NODE_COMPOUND_ASSIGN,
-    
+    NODE_IMPORTDB,
     // Control flow
     NODE_IF,
     NODE_WHILE,
