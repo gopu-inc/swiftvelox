@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 700
 #include <stdio.h>
+#include <net.h>
 #include "io.h"
 #include <stdlib.h>
 #include <string.h>
@@ -684,6 +685,18 @@ static double evalFloat(ASTNode* node) {
     if (!node) return 0.0;
     
     switch (node->type) {
+        
+        case NODE_NET_SOCKET:
+            net_socket(node);
+            return (double)node->data.int_val; // Récupère le FD stocké par net.c
+            
+        case NODE_NET_LISTEN:
+            net_listen(node);
+            return (double)node->data.int_val;
+            
+        case NODE_NET_ACCEPT:
+            net_accept(node);
+            return (double)node->data.int_val;
         case NODE_INT:
             return (double)node->data.int_val;
             
@@ -873,6 +886,14 @@ static char* evalString(ASTNode* node) {
     if (!node) return str_copy("");
     
     switch (node->type) {
+        
+        case NODE_NET_RECV:
+            net_recv(node);
+            if (node->data.str_val) {
+                // Transfert de propriété de la string (attention aux fuites, ici simplifié)
+                return node->data.str_val; 
+            }
+            return str_copy("");
         case NODE_STRING:
             return str_copy(node->data.str_val);
             
@@ -1237,7 +1258,16 @@ static void execute(ASTNode* node) {
     }
     break;
 }
-        
+        // net pour le command void
+        case NODE_NET_CONNECT:
+            net_connect(node);
+            break;
+        case NODE_NET_SEND:
+            net_send(node);
+            break;
+        case NODE_NET_CLOSE:
+            net_close(node);
+            break;
         case NODE_VAR_DECL:
         case NODE_NET_DECL:
         case NODE_CLOG_DECL:
