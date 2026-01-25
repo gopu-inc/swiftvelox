@@ -1,4 +1,3 @@
-// http.c
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +6,7 @@
 #include "common.h"
 #include "http.h"
 
+// Structure pour stocker la réponse en mémoire
 struct string {
   char *ptr;
   size_t len;
@@ -22,6 +22,7 @@ void init_string(struct string *s) {
   s->ptr[0] = '\0';
 }
 
+// Callback pour écrire les données en mémoire
 size_t writefunc(void *ptr, size_t size, size_t nmemb, struct string *s) {
   size_t new_len = s->len + size * nmemb;
   s->ptr = realloc(s->ptr, new_len + 1);
@@ -32,15 +33,18 @@ size_t writefunc(void *ptr, size_t size, size_t nmemb, struct string *s) {
   memcpy(s->ptr + s->len, ptr, size * nmemb);
   s->ptr[new_len] = '\0';
   s->len = new_len;
-  
   return size * nmemb;
 }
 
-// Pour la barre de progression
+// Callback pour écrire dans un fichier
+size_t write_file(void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    return fwrite(ptr, size, nmemb, stream);
+}
+
+// Callback pour la barre de progression
 int progress_callback(void *clientp, double dltotal, double dlnow, double ultotal, double ulnow) {
     if (dltotal <= 0) return 0;
-    
-    int barWidth = 50;
+    int barWidth = 40;
     double progress = dlnow / dltotal;
     int pos = (int)(barWidth * progress);
 
@@ -72,18 +76,16 @@ char* http_get(const char* url) {
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunc);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &s);
         curl_easy_setopt(curl, CURLOPT_USERAGENT, "Zarch-Client/1.0");
-        
-        // Pour HTTPS (désactive la vérif si besoin, mais mieux de laisser)
-        // curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Suivre les redirections
 
         res = curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+
         if(res != CURLE_OK) {
             printf("%s[HTTP ERROR]%s GET failed: %s\n", COLOR_RED, COLOR_RESET, curl_easy_strerror(res));
             free(s.ptr);
-            curl_easy_cleanup(curl);
             return NULL;
         }
-        curl_easy_cleanup(curl);
         return s.ptr;
     }
     return NULL;
@@ -108,23 +110,18 @@ char* http_post(const char* url, const char* json_data) {
         curl_easy_setopt(curl, CURLOPT_USERAGENT, "Zarch-Client/1.0");
 
         res = curl_easy_perform(curl);
+        
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+
         if(res != CURLE_OK) {
             printf("%s[HTTP ERROR]%s POST failed: %s\n", COLOR_RED, COLOR_RESET, curl_easy_strerror(res));
             free(s.ptr);
-            curl_slist_free_all(headers);
-            curl_easy_cleanup(curl);
             return NULL;
         }
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
         return s.ptr;
     }
     return NULL;
-}
-
-size_t write_file(void *ptr, size_t size, size_t nmemb, FILE *stream) {
-    size_t written = fwrite(ptr, size, nmemb, stream);
-    return written;
 }
 
 char* http_download(const char* url, const char* output_filename) {
@@ -136,29 +133,34 @@ char* http_download(const char* url, const char* output_filename) {
     if (curl) {
         fp = fopen(output_filename, "wb");
         if (!fp) {
-            printf("%s[HTTP ERROR]%s Cannot open file for writing: %s\n", COLOR_RED, COLOR_RESET, output_filename);
+            printf("%s[HTTP ERROR]%s Cannot open file: %s\n", COLOR_RED, COLOR_RESET, output_filename);
+            curl_easy_cleanup(curl);
             return NULL;
         }
 
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_file);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L); // Activer la progression
         curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, progress_callback);
         curl_easy_setopt(curl, CURLOPT_USERAGENT, "Zarch-Client/1.0");
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
         printf("Downloading %s...\n", output_filename);
         res = curl_easy_perform(curl);
-        printf("\n"); // Nouvelle ligne après la barre de progression
+        printf("\n"); // Saut de ligne après la barre
 
         fclose(fp);
         curl_easy_cleanup(curl);
 
         if(res == CURLE_OK) {
-            return str_copy("success");
+            // Retourne une nouvelle chaîne "success" que l'appelant devra free
+            char* success_msg = malloc(8);
+            strcpy(success_msg, "success");
+            return success_msg;
         } else {
             printf("%s[HTTP ERROR]%s Download failed: %s\n", COLOR_RED, COLOR_RESET, curl_easy_strerror(res));
-            remove(output_filename); // Supprimer le fichier incomplet
+            remove(output_filename); // Supprimer le fichier partiel
             return NULL;
         }
     }
