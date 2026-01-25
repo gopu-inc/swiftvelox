@@ -1244,6 +1244,7 @@ static void execute(ASTNode* node) {
         case NODE_DOS_DECL:
         case NODE_SEL_DECL:
         case NODE_CONST_DECL: {
+            // 1. DÉTERMINER LE TYPE
             TokenKind var_type = TK_VAR;
             if (node->type == NODE_NET_DECL) var_type = TK_NET;
             else if (node->type == NODE_CLOG_DECL) var_type = TK_CLOG;
@@ -1251,8 +1252,53 @@ static void execute(ASTNode* node) {
             else if (node->type == NODE_SEL_DECL) var_type = TK_SEL;
             else if (node->type == NODE_CONST_DECL) var_type = TK_CONST;
             
+            // 2. CALCULER LA VALEUR D'ABORD (IMPORTANT : AVANT d'allouer la variable)
+            // Cela empêche les fonctions appelées d'écraser la mémoire de cette variable
+            bool has_init = false;
+            bool val_is_str = false;
+            bool val_is_float = false;
+            char* temp_str = NULL;
+            double temp_float = 0.0;
+            int64_t temp_int = 0;
+            
+            if (node->left) {
+                has_init = true;
+                if (node->left->type == NODE_STRING) {
+                    val_is_str = true;
+                    temp_str = str_copy(node->left->data.str_val);
+                } 
+                else if (node->left->type == NODE_FLOAT) {
+                    val_is_float = true;
+                    temp_float = node->left->data.float_val;
+                }
+                else if (node->left->type == NODE_BOOL) {
+                    temp_int = node->left->data.bool_val ? 1 : 0;
+                }
+                else {
+                    // Pour les appels de fonction ou expressions
+                    // On exécute l'expression MAINTENANT
+                    temp_float = evalFloat(node->left);
+                    
+                    // Si c'était un appel de fonction qui a renvoyé une string
+                    if (node->left->type == NODE_FUNC_CALL) {
+                        Function* f = findFunction(node->left->data.name);
+                        if (f && f->return_string) {
+                            val_is_str = true;
+                            temp_str = str_copy(f->return_string);
+                        } else {
+                            val_is_float = true; // On assume float par défaut pour les retours
+                        }
+                    } else {
+                        // Expression mathématique standard
+                        val_is_float = true; 
+                    }
+                }
+            }
+            
+            // 3. MAINTENANT ON ALLOUE LA VARIABLE (Une fois que l'exécution est finie)
             if (var_count < 1000) {
-                Variable* var = &vars[var_count];
+                Variable* var = &vars[var_count]; // On prend le slot
+                
                 strncpy(var->name, node->data.name, 99);
                 var->name[99] = '\0';
                 var->type = var_type;
@@ -1262,28 +1308,20 @@ static void execute(ASTNode* node) {
                 var->module = NULL;
                 var->is_exported = false;
                 
-                if (node->left) {
+                if (has_init) {
                     var->is_initialized = true;
-                    
-                    if (node->left->type == NODE_STRING) {
+                    if (val_is_str) {
                         var->is_string = true;
                         var->is_float = false;
-                        var->value.str_val = str_copy(node->left->data.str_val);
-                    } 
-                    else if (node->left->type == NODE_FLOAT) {
+                        var->value.str_val = temp_str;
+                    } else if (val_is_float) {
                         var->is_float = true;
                         var->is_string = false;
-                        var->value.float_val = evalFloat(node->left);
-                    }
-                    else if (node->left->type == NODE_BOOL) {
+                        var->value.float_val = temp_float;
+                    } else {
                         var->is_float = false;
                         var->is_string = false;
-                        var->value.int_val = node->left->data.bool_val ? 1 : 0;
-                    }
-                    else {
-                        var->is_float = false;
-                        var->is_string = false;
-                        var->value.int_val = (int64_t)evalFloat(node->left);
+                        var->value.int_val = (int64_t)(val_is_float ? temp_float : temp_int);
                     }
                 } else {
                     var->is_initialized = false;
@@ -1292,7 +1330,7 @@ static void execute(ASTNode* node) {
                     var->value.int_val = 0;
                 }
                 
-                var_count++;
+                var_count++; // On incrémente le compteur SEULEMENT à la fin
                 printf("%s[EXEC]%s Variable '%s' declared\n", COLOR_CYAN, COLOR_RESET, var->name);
             }
             break;
