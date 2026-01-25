@@ -304,68 +304,43 @@ static void registerClass(const char* name, char* parent, ASTNode* members) {
 static bool isLocalImport(const char* import_path) {
     return import_path[0] == '.' || import_path[0] == '/';
 }
+// [FICHIER: swf.c] Remplacer resolveModulePath
+
 static char* resolveModulePath(const char* import_path, const char* from_module) {
     char* resolved = malloc(PATH_MAX);
     if (!resolved) return NULL;
     
-    // Si chemin absolu
+    // 1. Chemin absolu
     if (import_path[0] == '/') {
         snprintf(resolved, PATH_MAX, "%s", import_path);
-        if (!strstr(resolved, ".swf")) {
-            strcat(resolved, ".swf");
-        }
-        return resolved;
     }
-    
-    // Si chemin relatif (commence par .)
-    if (import_path[0] == '.') {
-        if (from_module && from_module[0]) {
-            // Relatif au module appelant
-            char module_dir[PATH_MAX];
-            strncpy(module_dir, from_module, PATH_MAX);
-            char* dir = dirname(module_dir);
-            snprintf(resolved, PATH_MAX, "%s/%s", dir, import_path);
+    // 2. Chemin relatif (commence par . ou ..)
+    else if (import_path[0] == '.') {
+        snprintf(resolved, PATH_MAX, "%s/%s", current_working_dir, import_path);
+    }
+    // 3. Module système (ex: "community/web.swf")
+    else {
+        // Chercher d'abord localement
+        char local_try[PATH_MAX];
+        snprintf(local_try, PATH_MAX, "%s/%s", current_working_dir, import_path);
+        
+        if (access(local_try, F_OK) == 0) {
+            strcpy(resolved, local_try);
         } else {
-            // Relatif au répertoire courant
-            snprintf(resolved, PATH_MAX, "%s/%s", current_working_dir, import_path);
-        }
-        
-        // Normaliser le chemin
-        char normalized[PATH_MAX];
-        if (realpath(resolved, normalized) != NULL) {  // CORRIGÉ: != NULL au lieu de ) != NULL)
-            free(resolved);
-            resolved = strdup(normalized);
-        }
-        
-        if (!strstr(resolved, ".swf")) {
-            strcat(resolved, ".swf");
-        }
-        return resolved;
-    }
-    
-    // Module sans chemin (chercher dans les chemins système)
-    const char* search_paths[] = {
-        current_working_dir,
-        "/usr/local/lib/swift/modules/",
-        "/usr/local/lib/swift/packages/",
-        "/usr/local/lib/swift/lib/",
-        NULL
-    };
-    
-    for (int i = 0; search_paths[i]; i++) {
-        snprintf(resolved, PATH_MAX, "%s/%s.swf", search_paths[i], import_path);
-        if (access(resolved, F_OK) == 0) {
-            return resolved;
-        }
-        
-        snprintf(resolved, PATH_MAX, "%s/%s/%s.swf", search_paths[i], import_path, import_path);
-        if (access(resolved, F_OK) == 0) {
-            return resolved;
+            // Sinon chercher dans /usr/local/lib/swift/
+            snprintf(resolved, PATH_MAX, "/usr/local/lib/swift/%s", import_path);
         }
     }
     
-    free(resolved);
-    return NULL;
+    // Nettoyer le chemin (realpath) pour éviter les /root/./truc
+    char final_path[PATH_MAX];
+    if (realpath(resolved, final_path)) {
+        free(resolved);
+        return strdup(final_path);
+    }
+    
+    // Si realpath échoue (fichier n'existe pas encore), on retourne le chemin construit
+    return resolved; 
 }
 
 // ======================================================
@@ -374,8 +349,8 @@ static char* resolveModulePath(const char* import_path, const char* from_module)
 static bool loadAndExecuteModule(const char* import_path, const char* from_module, 
                                  bool import_named, char** named_symbols, int symbol_count) {
     printf("\n%s-%s\n", COLOR_BRIGHT_RED, COLOR_RESET);
-    printf("%s>>> LOAD AND EXEC MODULE: %s <<<%s\n", COLOR_BRIGHT_RED, COLOR_RESET, import_path);
-    printf("%s-%s\n\n", COLOR_BRIGHT_RED, COLOR_RESET);
+    printf("%s LOAD MODULE...: %s %s\n", COLOR_GREEN, COLOR_RESET, import_path);
+    printf("%s-%s\n\n", COLOR_GREEN, COLOR_RESET);
     
     // 1. Résoudre le chemin du module
     char* full_path = resolveModulePath(import_path, from_module);
@@ -384,7 +359,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
         return false;
     }
     
-    printf("%s[IMPORT DEBUG]%s Resolved path: %s\n", COLOR_YELLOW, COLOR_RESET, full_path);
+    printf("%s[IMPORT -> R]%s Resolved path: %s\n", COLOR_YELLOW, COLOR_RESET, full_path);
     
     // 2. Ouvrir le fichier
     FILE* f = fopen(full_path, "r");
@@ -411,7 +386,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     source[size] = '\0';
     fclose(f);
     
-    printf("%s[IMPORT DEBUG]%s File read: %ld bytes\n", COLOR_YELLOW, COLOR_RESET, size);
+    printf("%s[READ -> F]%s File read: %ld bytes\n", COLOR_YELLOW, COLOR_RESET, size);
     
     // 4. Sauvegarder l'état actuel
     char old_dir[PATH_MAX];
@@ -429,7 +404,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     int old_export_count = export_count;
     
     // 6. Parser le module
-    printf("%s[IMPORT DEBUG]%s Parsing module...\n", COLOR_YELLOW, COLOR_RESET);
+    printf("%s[IMPORT -> P]%s Parsing module...\n", COLOR_YELLOW, COLOR_RESET);
     int node_count = 0;
     ASTNode** nodes = parse(source, &node_count);
     
@@ -441,7 +416,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
         return false;
     }
     
-    printf("%s[IMPORT DEBUG]%s Module parsed successfully: %d nodes\n", 
+    printf("%s[IMPORT -> S]%s Module parsed successfully: %d nodes\n", 
            COLOR_GREEN, COLOR_RESET, node_count);
 
     // =================================================================
@@ -450,7 +425,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     // C'est l'étape manquante. Il faut exécuter les noeuds NODE_EXPORT 
     // maintenant pour qu'ils appellent registerExport() et remplissent
     // le tableau global 'exports' avant qu'on essaie de le lire.
-    printf("%s[IMPORT DEBUG]%s Pre-processing exports...\n", COLOR_YELLOW, COLOR_RESET);
+    printf("%s[IMPORT -> L]%s Pre-processing exports...\n", COLOR_YELLOW, COLOR_RESET);
     for (int i = 0; i < node_count; i++) {
         if (nodes[i] && nodes[i]->type == NODE_EXPORT) {
             execute(nodes[i]); 
@@ -459,7 +434,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     // =================================================================
     
     // 7. Collecter les nouveaux exports et créer les fonctions/variables correspondantes
-    printf("%s[IMPORT DEBUG]%s Collecting exports from module...\n", COLOR_YELLOW, COLOR_RESET);
+    printf("%s[IMPORT -> C]%s Collecting exports from module...\n", COLOR_YELLOW, COLOR_RESET);
     
     // Maintenant export_count a été mis à jour par l'étape 6.5
     for (int i = old_export_count; i < export_count; i++) {
@@ -489,7 +464,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
                 exp->symbol && strcmp(target_func->data.name, exp->symbol) == 0) {
                 
                 char* name_to_use = exp->alias ? exp->alias : exp->symbol;
-                printf("%s[IMPORT DEBUG]%s Registering function: %s -> %s\n",
+                printf("%s[IMPORT -> R]%s Registering function: %s -> %s\n",
                        COLOR_GREEN, COLOR_RESET, exp->symbol, name_to_use);
                 
                 // Compter les paramètres
@@ -589,7 +564,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     
     // 9. Exécuter le code d'initialisation du module (top-level code)
     // On évite les déclarations de fonctions (déjà gérées) et les exports (déjà faits en 6.5)
-    printf("%s[IMPORT DEBUG]%s Executing module initialization code...\n", COLOR_YELLOW, COLOR_RESET);
+    printf("%s[IMPORT -> E]%s Executing module initialization code...\n", COLOR_YELLOW, COLOR_RESET);
     
     for (int i = 0; i < node_count; i++) {
         if (nodes[i] && nodes[i]->type != NODE_FUNC && nodes[i]->type != NODE_EXPORT) {
@@ -599,7 +574,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     
     // 10. Restaurer l'état
     strncpy(current_working_dir, old_dir, PATH_MAX);
-    printf("%s[IMPORT DEBUG]%s Working directory restored: %s\n", COLOR_YELLOW, COLOR_RESET, current_working_dir);
+    printf("%s[IMPORT RESULT]%s Working directory restored: %s\n", COLOR_YELLOW, COLOR_RESET, current_working_dir);
     
     // 11. Nettoyer
     // Note: On ne fait qu'un nettoyage partiel car les pointeurs des noms de fonctions/vars 
