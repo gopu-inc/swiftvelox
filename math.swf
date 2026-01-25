@@ -1,0 +1,7 @@
+export func math() {
+    var t = 3.000;
+    var PI = 50.000;
+    var PS = PI + t;
+    
+    return PS; // <--- Renvoie la valeur
+}

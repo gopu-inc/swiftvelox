@@ -1,0 +1,5 @@
+import "./math.swf";
+main() {
+     var result = math();
+     print("math = ", result);
+}

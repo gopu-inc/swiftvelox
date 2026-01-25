@@ -1,0 +1,9 @@
+// client.swf
+main() {
+    var sock = net.socket();
+    net.connect(sock, "127.0.0.1", 8080);
+    net.send(sock, "Hello Server!");
+    var response = net.recv(sock, 1024);
+    print("Server said: ", response);
+    net.close(sock);
+}

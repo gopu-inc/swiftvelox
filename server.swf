@@ -1,0 +1,13 @@
+// server.swf
+main() {
+    print("Starting server on port 8080...");
+    var server = net.listen(8080);
+    
+    while (true) {
+        var client = net.accept(server);
+        var msg = net.recv(client, 1024);
+        print("Received: ", msg);
+        net.send(client, "Hello from SwiftFlow Server!");
+        net.close(client);
+    }
+}
