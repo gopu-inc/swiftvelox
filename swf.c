@@ -16,7 +16,16 @@
 #include <sys/stat.h>
 #include <fcntl.h>  
 #include "common.h"
+#include <sqlite3.h>
+#include <time.h>
 
+#define USE_SQLITE
+// ======================================================
+// [SECTION] IMPORT DATABASE GLOBALS
+// ======================================================
+static sqlite3* import_db = NULL;
+static bool db_initialized = false;
+static char* db_path = "swift_imports.db";
 // ======================================================
 // [SECTION] GLOBAL STATE
 // ======================================================
@@ -362,12 +371,314 @@ static char* resolveModulePath(const char* import_path, const char* from_module)
     free(resolved);
     return NULL;
 }
+// ======================================================
+// [SECTION] IMPORT DATABASE FUNCTIONS
+// ======================================================
 
+static bool init_import_db() {
+    if (db_initialized && import_db) return true;
+    
+    int rc = sqlite3_open(db_path, &import_db);
+    if (rc != SQLITE_OK) {
+        printf("%s[DB ERROR]%s Cannot open database: %s\n", 
+               COLOR_RED, COLOR_RESET, sqlite3_errmsg(import_db));
+        import_db = NULL;
+        return false;
+    }
+    
+    // Créer les tables si elles n'existent pas
+    const char* create_tables = 
+        "CREATE TABLE IF NOT EXISTS imports ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "module_path TEXT NOT NULL,"
+        "resolved_path TEXT NOT NULL,"
+        "from_module TEXT,"
+        "import_time INTEGER NOT NULL,"
+        "UNIQUE(module_path, from_module)"
+        ");"
+        "CREATE TABLE IF NOT EXISTS exports ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "module_path TEXT NOT NULL,"
+        "symbol TEXT NOT NULL,"
+        "alias TEXT,"
+        "symbol_type TEXT NOT NULL,"  // 'function', 'constant', 'variable', etc.
+        "import_id INTEGER,"
+        "FOREIGN KEY(import_id) REFERENCES imports(id),"
+        "UNIQUE(module_path, symbol)"
+        ");"
+        "CREATE INDEX IF NOT EXISTS idx_imports_path ON imports(module_path);"
+        "CREATE INDEX IF NOT EXISTS idx_exports_module ON exports(module_path);"
+        "CREATE INDEX IF NOT EXISTS idx_exports_symbol ON exports(symbol);";
+    
+    char* err_msg = NULL;
+    rc = sqlite3_exec(import_db, create_tables, NULL, NULL, &err_msg);
+    
+    if (rc != SQLITE_OK) {
+        printf("%s[DB ERROR]%s Cannot create tables: %s\n", 
+               COLOR_RED, COLOR_RESET, err_msg);
+        sqlite3_free(err_msg);
+        sqlite3_close(import_db);
+        import_db = NULL;
+        return false;
+    }
+    
+    db_initialized = true;
+    printf("%s[DB]%s Import database initialized: %s\n", 
+           COLOR_GREEN, COLOR_RESET, db_path);
+    return true;
+}
+
+static void close_import_db() {
+    if (import_db) {
+        sqlite3_close(import_db);
+        import_db = NULL;
+    }
+    db_initialized = false;
+    printf("%s[DB]%s Import database closed\n", COLOR_GREEN, COLOR_RESET);
+}
+
+static bool register_import(const char* module_path, const char* resolved_path, 
+                           const char* from_module) {
+    if (!init_import_db()) return false;
+    
+    // Vérifier si déjà importé
+    sqlite3_stmt* stmt;
+    const char* check_sql = "SELECT id FROM imports WHERE module_path = ? AND from_module = ?";
+    
+    int rc = sqlite3_prepare_v2(import_db, check_sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return false;
+    
+    sqlite3_bind_text(stmt, 1, module_path, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, from_module ? from_module : "", -1, SQLITE_STATIC);
+    
+    bool already_imported = (sqlite3_step(stmt) == SQLITE_ROW);
+    sqlite3_finalize(stmt);
+    
+    if (already_imported) {
+        printf("%s[DB INFO]%s Module already imported: %s\n", 
+               COLOR_YELLOW, COLOR_RESET, module_path);
+        return true;
+    }
+    
+    // Insérer le nouvel import
+    const char* insert_sql = 
+        "INSERT INTO imports (module_path, resolved_path, from_module, import_time) "
+        "VALUES (?, ?, ?, ?)";
+    
+    rc = sqlite3_prepare_v2(import_db, insert_sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return false;
+    
+    sqlite3_bind_text(stmt, 1, module_path, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, resolved_path, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, from_module ? from_module : "", -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 4, time(NULL));
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    if (rc != SQLITE_DONE) {
+        printf("%s[DB ERROR]%s Failed to register import: %s\n", 
+               COLOR_RED, COLOR_RESET, module_path);
+        return false;
+    }
+    
+    printf("%s[DB]%s Registered import: %s\n", COLOR_GREEN, COLOR_RESET, module_path);
+    return true;
+}
+
+static bool record_export(const char* module_path, const char* symbol, 
+                         const char* alias, const char* symbol_type) {
+    if (!init_import_db()) return false;
+    
+    // Obtenir l'ID de l'import
+    sqlite3_stmt* stmt;
+    const char* get_import_sql = 
+        "SELECT id FROM imports WHERE module_path = ? ORDER BY import_time DESC LIMIT 1";
+    
+    int rc = sqlite3_prepare_v2(import_db, get_import_sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return false;
+    
+    sqlite3_bind_text(stmt, 1, module_path, -1, SQLITE_STATIC);
+    
+    int import_id = -1;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        import_id = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    
+    if (import_id == -1) {
+        printf("%s[DB WARNING]%s No import record found for: %s\n", 
+               COLOR_YELLOW, COLOR_RESET, module_path);
+        return false;
+    }
+    
+    // Insérer l'export
+    const char* insert_sql = 
+        "INSERT OR REPLACE INTO exports (module_path, symbol, alias, symbol_type, import_id) "
+        "VALUES (?, ?, ?, ?, ?)";
+    
+    rc = sqlite3_prepare_v2(import_db, insert_sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return false;
+    
+    sqlite3_bind_text(stmt, 1, module_path, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, symbol, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, alias ? alias : symbol, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, symbol_type, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 5, import_id);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    if (rc != SQLITE_DONE) {
+        printf("%s[DB ERROR]%s Failed to record export: %s.%s\n", 
+               COLOR_RED, COLOR_RESET, module_path, symbol);
+        return false;
+    }
+    
+    printf("%s[DB]%s Recorded export: %s.%s as %s\n", 
+           COLOR_GREEN, COLOR_RESET, module_path, symbol, alias ? alias : symbol);
+    return true;
+}
+
+static bool is_module_imported(const char* module_path, const char* from_module) {
+    if (!init_import_db()) return false;
+    
+    sqlite3_stmt* stmt;
+    const char* sql = "SELECT 1 FROM imports WHERE module_path = ? AND from_module = ?";
+    
+    int rc = sqlite3_prepare_v2(import_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return false;
+    
+    sqlite3_bind_text(stmt, 1, module_path, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, from_module ? from_module : "", -1, SQLITE_STATIC);
+    
+    bool imported = (sqlite3_step(stmt) == SQLITE_ROW);
+    sqlite3_finalize(stmt);
+    
+    return imported;
+}
+
+static void show_import_db() {
+    if (!init_import_db()) {
+        printf("%s[DB ERROR]%s Database not initialized\n", COLOR_RED, COLOR_RESET);
+        return;
+    }
+    
+    printf("\n%s╔════════════════════════════════════════════════════════════════╗%s\n", 
+           COLOR_CYAN, COLOR_RESET);
+    printf("%s║                    IMPORT DATABASE (importdb)                  ║%s\n", 
+           COLOR_CYAN, COLOR_RESET);
+    printf("%s╠════════════════════════════════════════════════════════════════╣%s\n", 
+           COLOR_CYAN, COLOR_RESET);
+    
+    // Afficher les imports
+    printf("%s║                           IMPORTS                               ║%s\n", 
+           COLOR_CYAN, COLOR_RESET);
+    printf("%s╠════════════════════════════════════════════════════════════════╣%s\n", 
+           COLOR_CYAN, COLOR_RESET);
+    
+    sqlite3_stmt* stmt;
+    const char* import_sql = 
+        "SELECT module_path, resolved_path, from_module, "
+        "datetime(import_time, 'unixepoch') as import_time "
+        "FROM imports ORDER BY import_time DESC";
+    
+    int rc = sqlite3_prepare_v2(import_db, import_sql, -1, &stmt, NULL);
+    if (rc == SQLITE_OK) {
+        int count = 0;
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            count++;
+            const char* module = (const char*)sqlite3_column_text(stmt, 0);
+            const char* resolved = (const char*)sqlite3_column_text(stmt, 1);
+            const char* from = (const char*)sqlite3_column_text(stmt, 2);
+            const char* import_time = (const char*)sqlite3_column_text(stmt, 3);
+            
+            printf("%s║ %-30s → %-30s ║%s\n", COLOR_CYAN, module, resolved, COLOR_RESET);
+            printf("%s║   From: %-20s  Time: %-19s ║%s\n", 
+                   COLOR_CYAN, from[0] ? from : "(main)", import_time, COLOR_RESET);
+            printf("%s║                                                          ║%s\n",
+                   COLOR_CYAN, COLOR_RESET);
+        }
+        
+        if (count == 0) {
+            printf("%s║                   No imports recorded                     ║%s\n", 
+                   COLOR_CYAN, COLOR_RESET);
+        }
+        sqlite3_finalize(stmt);
+    }
+    
+    // Afficher les exports
+    printf("%s╠════════════════════════════════════════════════════════════════╣%s\n", 
+           COLOR_CYAN, COLOR_RESET);
+    printf("%s║                           EXPORTS                               ║%s\n", 
+           COLOR_CYAN, COLOR_RESET);
+    printf("%s╠════════════════════════════════════════════════════════════════╣%s\n", 
+           COLOR_CYAN, COLOR_RESET);
+    
+    const char* export_sql = 
+        "SELECT e.module_path, e.symbol, e.alias, e.symbol_type, "
+        "datetime(i.import_time, 'unixepoch') as import_time "
+        "FROM exports e LEFT JOIN imports i ON e.import_id = i.id "
+        "ORDER BY e.module_path, e.symbol";
+    
+    rc = sqlite3_prepare_v2(import_db, export_sql, -1, &stmt, NULL);
+    if (rc == SQLITE_OK) {
+        int count = 0;
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            count++;
+            const char* module = (const char*)sqlite3_column_text(stmt, 0);
+            const char* symbol = (const char*)sqlite3_column_text(stmt, 1);
+            const char* alias = (const char*)sqlite3_column_text(stmt, 2);
+            const char* type = (const char*)sqlite3_column_text(stmt, 3);
+            const char* import_time = (const char*)sqlite3_column_text(stmt, 4);
+            
+            const char* color = COLOR_CYAN;
+            if (strcmp(type, "function") == 0) color = COLOR_GREEN;
+            else if (strcmp(type, "constant") == 0) color = COLOR_YELLOW;
+            else if (strcmp(type, "variable") == 0) color = COLOR_BLUE;
+            
+            printf("%s║ %s%-10s%s %-15s → %-15s (from %-20s) ║%s\n", 
+                   COLOR_CYAN, color, type, COLOR_CYAN, 
+                   symbol, alias, module, COLOR_RESET);
+        }
+        
+        if (count == 0) {
+            printf("%s║          No exports record  ║%s\n", 
+                   COLOR_CYAN, COLOR_RESET);
+        }
+        sqlite3_finalize(stmt);
+    }
+    
+    printf("%s╚══════════════════════════════════════════════╝%s\n", 
+           COLOR_CYAN, COLOR_RESET);
+    printf("\n");
+}
+
+static void clear_import_db() {
+    if (!init_import_db()) return;
+    
+    const char* clear_sql = "DELETE FROM imports; DELETE FROM exports;";
+    char* err_msg = NULL;
+    
+    int rc = sqlite3_exec(import_db, clear_sql, NULL, NULL, &err_msg);
+    if (rc != SQLITE_OK) {
+        printf("%s[DB ERROR]%s Failed to clear database: %s\n", 
+               COLOR_RED, COLOR_RESET, err_msg);
+        sqlite3_free(err_msg);
+    } else {
+        printf("%s[DB]%s Import database cleared\n", COLOR_GREEN, COLOR_RESET);
+    }
+}
 // ======================================================
 // [SECTION] FONCTION D'IMPORT - MODIFIÉE
 // ======================================================
 static bool loadAndExecuteModule(const char* import_path, const char* from_module, 
                                  bool import_named, char** named_symbols, int symbol_count) {
+    if (is_module_imported(import_path, from_module)) {
+        printf("%s[IMPORT INFO]%s Module already imported: %s\n", 
+               COLOR_YELLOW, COLOR_RESET, import_path);
+        return true; // Déjà importé, on considère que c'est un succes
+        
     printf("\n%s-%s\n", 
            COLOR_BRIGHT_RED, COLOR_RESET);
     printf("%s>>> LOAD AND EXEC MODULE: %s <<<%s\n", 
@@ -615,6 +926,28 @@ static bool isSymbolExported(const char* symbol, const char* module_path) {
     }
     return false;
 }
+// Enregistrer dans la base de données
+    register_import(import_path, full_path, from_module);
+    
+    // Enregistrer tous les exports dans la DB
+    for (int i = old_export_count; i < export_count; i++) {
+        ExportEntry* exp = &exports[i];
+        if (exp->symbol && strstr(exp->module, import_path)) {
+            // Déterminer le type
+            const char* type = "unknown";
+            for (int j = 0; j < node_count; j++) {
+                if (nodes[j] && nodes[j]->data.name && 
+                    strcmp(nodes[j]->data.name, exp->symbol) == 0) {
+                    if (nodes[j]->type == NODE_FUNC) type = "function";
+                    else if (nodes[j]->type == NODE_CONST_DECL) type = "constant";
+                    else if (nodes[j]->type == NODE_VAR_DECL) type = "variable";
+                    break;
+                }
+            }
+            
+            record_export(import_path, exp->symbol, exp->alias, type);
+        }
+    }
 
 // ======================================================
 // [SECTION] VERSION AND HELP FUNCTIONS
@@ -1224,7 +1557,9 @@ static void execute(ASTNode* node) {
     }
     break;
 }
-        
+        case NODE_IMPORTDB:
+    show_import_db();
+    break;
         case NODE_VAR_DECL:
         case NODE_NET_DECL:
         case NODE_CLOG_DECL:
@@ -1768,7 +2103,10 @@ static void repl() {
         if (!fgets(line, sizeof(line), stdin)) break;
         
         line[strcspn(line, "\n")] = 0;
-        
+        if (strcmp(line, "importdb") == 0) {
+    show_import_db();
+    continue;
+}
         if (strcmp(line, "exit") == 0) break;
         if (strcmp(line, "quit") == 0) break;
         if (strcmp(line, "clear") == 0) {
