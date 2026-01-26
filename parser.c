@@ -703,6 +703,30 @@ static ASTNode* primary() {
     consume(TK_RPAREN, "Expected ')'");
     return node;
     } 
+    if (match(TK_STD_LEN)) {
+        ASTNode* node = newNode(NODE_STD_LEN);
+        consume(TK_LPAREN, "("); node->left = expression(); consume(TK_RPAREN, ")");
+        return node;
+    }
+    if (match(TK_STD_SPLIT)) {
+        ASTNode* node = newNode(NODE_STD_SPLIT);
+        consume(TK_LPAREN, "("); 
+        node->left = expression(); // string
+        consume(TK_COMMA, ",");
+        node->right = expression(); // delimiter
+        consume(TK_RPAREN, ")");
+        return node;
+    }
+    if (match(TK_STD_TO_INT)) {
+        ASTNode* node = newNode(NODE_STD_TO_INT);
+        consume(TK_LPAREN, "("); node->left = expression(); consume(TK_RPAREN, ")");
+        return node;
+    }
+    if (match(TK_STD_TO_STR)) {
+        ASTNode* node = newNode(NODE_STD_TO_STR);
+        consume(TK_LPAREN, "("); node->left = expression(); consume(TK_RPAREN, ")");
+        return node;
+    }
     if (match(TK_HTTP_GET)) return httpGetStatement();
     if (match(TK_HTTP_POST)) return httpPostStatement();
     if (match(TK_HTTP_DOWNLOAD)) return httpDownloadStatement();
