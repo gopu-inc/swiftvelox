@@ -22,6 +22,48 @@ static int warningCount = 0;
 static int scope_level = 0;
 
 // ======================================================
+// [SECTION] PROTOTYPES MODULES NATIFS
+// ======================================================
+// IO
+static ASTNode* ioOpenStatement();
+static ASTNode* ioCloseStatement();
+static ASTNode* ioReadStatement();
+static ASTNode* ioWriteStatement();
+static ASTNode* ioSeekStatement();
+static ASTNode* ioTellStatement();
+static ASTNode* ioFlushStatement();
+static ASTNode* ioExistsStatement();
+static ASTNode* ioIsfileStatement();
+static ASTNode* ioIsdirStatement();
+static ASTNode* ioMkdirStatement();
+static ASTNode* ioRmdirStatement();
+static ASTNode* ioListdirStatement();
+static ASTNode* ioRemoveStatement();
+static ASTNode* ioRenameStatement();
+static ASTNode* ioCopyStatement();
+
+// Net
+static ASTNode* netSocketStatement();
+static ASTNode* netConnectStatement();
+static ASTNode* netListenStatement();
+static ASTNode* netAcceptStatement();
+static ASTNode* netSendStatement();
+static ASTNode* netRecvStatement();
+static ASTNode* netCloseStatement();
+
+// Http
+static ASTNode* httpGetStatement();
+static ASTNode* httpPostStatement();
+static ASTNode* httpDownloadStatement();
+
+// Sys
+static ASTNode* sysExecStatement();
+static ASTNode* sysArgvStatement();
+static ASTNode* sysExitStatement();
+
+// Json
+static ASTNode* jsonGetStatement();
+// ======================================================
 // [SECTION] ERROR HANDLING
 // ======================================================
 static void errorAt(Token token, const char* message) {
@@ -724,7 +766,73 @@ static ASTNode* primary() {
     
     ASTNode* lambda = lambdaExpression();
     if (lambda) return lambda;
-        // --- MODULE 'io' ---
+        
+    else if (strcmp(module_name, "net") == 0) {
+        advance();
+        if (match(TK_PERIOD)) {
+            if (match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                if (strcmp(cmd, "socket") == 0) return netSocketStatement();
+                if (strcmp(cmd, "connect") == 0) return netConnectStatement();
+                if (strcmp(cmd, "listen") == 0) return netListenStatement();
+                if (strcmp(cmd, "accept") == 0) return netAcceptStatement();
+                if (strcmp(cmd, "send") == 0) return netSendStatement();
+                if (strcmp(cmd, "recv") == 0) return netRecvStatement();
+                if (strcmp(cmd, "close") == 0) return netCloseStatement();
+            }
+        }
+        current = start_token;
+    }
+    // --- MODULE 'http' ---
+    else if (strcmp(module_name, "http") == 0) {
+        advance();
+        if (match(TK_PERIOD)) {
+            if (match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                if (strcmp(cmd, "get") == 0) return httpGetStatement();
+                if (strcmp(cmd, "post") == 0) return httpPostStatement();
+                if (strcmp(cmd, "download") == 0) return httpDownloadStatement();
+            }
+        }
+        current = start_token;
+    }
+    // --- MODULE 'sys' ---
+    else if (strcmp(module_name, "sys") == 0) {
+        advance();
+        if (match(TK_PERIOD)) {
+            if (match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                if (strcmp(cmd, "exec") == 0) return sysExecStatement();
+                if (strcmp(cmd, "argv") == 0) return sysArgvStatement();
+                if (strcmp(cmd, "exit") == 0) return sysExitStatement();
+            }
+        }
+        current = start_token;
+    }
+    // --- MODULE 'json' ---
+    else if (strcmp(module_name, "json") == 0) {
+        advance();
+        if (match(TK_PERIOD)) {
+            if (match(TK_IDENT)) {
+                if (strcmp(previous.value.str_val, "get") == 0) return jsonGetStatement();
+            }
+        }
+        current = start_token;
+    }
+    // --- MODULE 'std' ---
+    else if (strcmp(module_name, "std") == 0) {
+        advance();
+        if (match(TK_PERIOD)) {
+            if (match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                if (strcmp(cmd, "len") == 0) { /* Implémenter stdLenStatement si nécessaire */ }
+                if (strcmp(cmd, "split") == 0) { /* Implémenter stdSplitStatement */ }
+            }
+        }
+        current = start_token;
+    }
+}
+// ========================================================================
     if (strcmp(module_name, "io") == 0) {
         advance(); // Consomme "io"
         if (match(TK_PERIOD)) {
