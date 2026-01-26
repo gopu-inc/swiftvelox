@@ -288,7 +288,7 @@ static int findVar(const char* name) {
 
 static void registerFunction(const char* name, ASTNode* params, ASTNode* body, int param_count) {
     if (func_count < 200) {
-        printf("%s[REGISTER FUNC]%s register: %s (params: %d)\n", COLOR_MAGENTA, COLOR_RESET, name, param_count);
+        
         Function* func = &functions[func_count];
         strncpy(func->name, name, 99);
         func->name[99] = '\0';
@@ -324,19 +324,16 @@ static void registerFunction(const char* name, ASTNode* params, ASTNode* body, i
 }
 
 static Function* findFunction(const char* name) {
-    printf("%s[FIND FUNC]%s search: '%s'\n", COLOR_MAGENTA, COLOR_RESET, name);
-    
+        
     // Chercher exact
     for (int i = 0; i < func_count; i++) {
-        printf("%s[FIND FUNC]%s   available func %d: '%s'\n", 
-               COLOR_MAGENTA, COLOR_RESET, i, functions[i].name);
         if (strcmp(functions[i].name, name) == 0) {
-            printf("%s[FIND FUNC]%s   → FOUND!\n", COLOR_GREEN, COLOR_RESET);
+            
             return &functions[i];
         }
     }
     
-    printf("%s[FIND FUNC]%s %s  =::=>→ NOT FOUND\n", COLOR_RED, COLOR_RESET, name);
+    printf("%s%s %s  <== NOT FOUND function\n", COLOR_RED, COLOR_RESET, name);
     return NULL;
 }
 
@@ -348,7 +345,7 @@ static void registerClass(const char* name, char* parent, ASTNode* members) {
         cls->parent = parent ? str_copy(parent) : NULL;
         cls->members = members;
         class_count++;
-        printf("%s[CLASS REG]%s Class '%s' registered\n", COLOR_MAGENTA, COLOR_RESET, name);
+        
     }
 }
 static ModuleCache* findInCache(const char* absolute_path) {
@@ -1332,7 +1329,7 @@ static void executeRead(ASTNode* node) {
             vars[idx].value.str_val = str_copy(content);
             vars[idx].is_initialized = true;
         }
-        printf("%s[READ]%s Read %ld bytes from: %s\n", COLOR_GREEN, COLOR_RESET, size, filename);
+
     }
     
     free(content);
@@ -1365,7 +1362,7 @@ static void executeWrite(ASTNode* node) {
     
     FILE* f = fopen(filename, mode);
     if (!f) {
-        printf("%s[WRITE ERROR]%s Cannot open file for writing: %s\n", COLOR_RED, COLOR_RESET, filename);
+        printf("%sWRITE ERROR%s Cannot open file for writing: %s\n", COLOR_RED, COLOR_RESET, filename);
         free(filename);
         free(data);
         return;
@@ -1375,8 +1372,7 @@ static void executeWrite(ASTNode* node) {
     fclose(f);
     
     const char* mode_desc = (mode[0] == 'a') ? "appended to" : "written to";
-    printf("%s[WRITE]%s %zu bytes %s: %s\n", COLOR_GREEN, COLOR_RESET, written, mode_desc, filename);
-    
+        
     free(filename);
     free(data);
 }
@@ -1407,8 +1403,7 @@ static void executeAppend(ASTNode* node) {
     size_t written = fwrite(data, 1, strlen(data), f);
     fclose(f);
     
-    printf("%s[APPEND]%s %zu bytes appended to: %s\n", COLOR_GREEN, COLOR_RESET, written, filename);
-    
+        
     free(filename);
     free(data);
 }
@@ -1839,7 +1834,7 @@ case NODE_DIR_LIST:
         case NODE_DBVAR: {
             printf("\n%s╔═════════════════════════════════════════════════╗%s\n", 
                    COLOR_CYAN, COLOR_RESET);
-            printf("%s║                   VARIABLE TABLE (dbvar)          ║%s\n", 
+             printf("%s║                   VARIABLE TABLE (dbvar)          ║%s\n", 
                    COLOR_CYAN, COLOR_RESET);
             printf("%s╠═══════════════════════════════════════════════════╣%s\n", 
                    COLOR_CYAN, COLOR_RESET);
@@ -2189,7 +2184,7 @@ case NODE_DIR_LIST:
             int idx = findVar(node->left->data.name);
             if (idx >= 0) {
                 if (vars[idx].is_locked) {
-                    printf("Cannot not lock ");
+                    printf("Cannot not lock variable not found");
                     return;
                 }
                 // Verrouillage
