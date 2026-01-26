@@ -28,6 +28,19 @@
 static char current_working_dir[PATH_MAX];
 extern ASTNode** parse(const char* source, int* count);
 static char* generateLambdaName();
+static const char* current_exec_filename = "main";
+
+void runtime_error(ASTNode* node, const char* fmt, ...) {
+    va_list args;
+    fprintf(stderr, "%s[RUNTIME ERROR] %s:%d:%d: %s", 
+            COLOR_RED, current_exec_filename, node->line, node->column, COLOR_RESET);
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    va_end(args);
+    fprintf(stderr, "\n");
+    exit(1); // On arrête tout proprement
+}
+
 // Fonctions IO
 void io_open(ASTNode* node);
 void io_close(ASTNode* node);
@@ -1466,15 +1479,11 @@ static void execute(ASTNode* node) {
              break;
         }
         case NODE_EXPORT: {
-    printf("%s[EXECUTE EXPORT]%s Processing export\n", COLOR_MAGENTA, COLOR_RESET);
-    
+        
     if (node->data.export.symbol) {
         char* symbol = node->data.export.symbol;
         char* alias = node->data.export.alias ? node->data.export.alias : symbol;
-        
-        printf("%s[EXECUTE EXPORT]%s Registering export: %s as %s\n",
-               COLOR_MAGENTA, COLOR_RESET, symbol, alias);
-        
+                
         registerExport(symbol, alias);
     }
     break;
@@ -1600,12 +1609,10 @@ static void execute(ASTNode* node) {
                 }
                 
                 var_count++; // On incrémente le compteur SEULEMENT à la fin
-                printf("%s[EXEC]%s Variable '%s' declared\n", COLOR_CYAN, COLOR_RESET, var->name);
             }
             break;
         }
-        // Dans swf.c, dans la fonction execute(), après le case NODE_APPEND:
-// (environ ligne 950-1000)
+        
 
 case NODE_FILE_OPEN:
     io_open(node);
@@ -1689,7 +1696,7 @@ case NODE_DIR_LIST:
             // 3. AFFECTATION DE LA VALEUR
             if (idx >= 0) {
                 if (vars[idx].is_constant) {
-                    printf("%s[EXEC ERROR]%s Cannot assign to constant '%s'\n", COLOR_RED, COLOR_RESET, target_name);
+                      runtime_error(node, "Cannot assign to constant '%s'", target_name);
                 } 
                 else if (node->right) {
                     vars[idx].is_initialized = true;
@@ -1722,7 +1729,7 @@ case NODE_DIR_LIST:
                         // On évalue en string pour voir si c'est du texte ou une instance
                         char* val_str = evalString(node->right);
                         if (vars[idx].is_locked) {
-                            printf("%s[SEC ERROR]%s Cannot assign to locked variable '%s'\n", COLOR_RED, COLOR_RESET, vars[idx].name);
+                            runtime_error(node, "Cannot assign to constant '%s'", target_name);
                              return;
                         }
                         // Détection simple : Si ça ressemble à une instance "inst_" ou contient des lettres
@@ -1905,8 +1912,7 @@ case NODE_DIR_LIST:
                 
                 // Importer avec les symboles nommés
                 if (!loadAndExecuteModule(module_name, from_module, true, named_symbols, symbol_count)) {
-                    printf("%s[IMPORT ERROR]%s Failed to import named symbols from: %s\n", 
-                           COLOR_RED, COLOR_RESET, module_name);
+                    runtime_error(node, "Cannot import '%s'", module_name);
                 }
                 
                 // Nettoyer
@@ -1918,8 +1924,7 @@ case NODE_DIR_LIST:
             // Import simple (import "math")
             else {
                 if (!loadAndExecuteModule(module_name, from_module, false, NULL, 0)) {
-                    printf("%s[IMPORT ERROR]%s Failed to import: %s\n", 
-                           COLOR_RED, COLOR_RESET, module_name);
+                     runtime_error(node, "import runtime stoped '%s'", module_name);                          
                 }
             }
         }
@@ -1954,7 +1959,7 @@ case NODE_DIR_LIST:
             // Sécurité boucle infinie (optionnel, mis à 1M itérations)
             safety_count++;
             if (safety_count > 1000000) {
-                printf("%s[EXEC ERROR]%s Infinite loop detected in while\n", COLOR_RED, COLOR_RESET);
+                runtime_error(node, "Cannot while func '%s'", current_function);
                 break;
             }
         }
@@ -2063,9 +2068,7 @@ case NODE_DIR_LIST:
     // Enregistrer la fonction SEULEMENT si on est dans le scope global
     // et si ce n'est pas dans un module importé (géré par loadAndExecuteModule)
     if (node->data.name && scope_level == 0) {
-        printf("%s[EXECUTE]%s Registering function: %s\n", 
-               COLOR_MAGENTA, COLOR_RESET, node->data.name);
-        
+                               
         int param_count = 0;
         ASTNode* param = node->left;
         while (param) {
@@ -2172,7 +2175,7 @@ case NODE_DIR_LIST:
             if (is_method) current_this = prev_this;
             
         } else {
-            printf("%s[EXEC ERROR]%s Function not found: %s\n", COLOR_RED, COLOR_RESET, func_name);
+            runtime_error(node, "Cannot assign to constant '%s'", target_name);
         }
         
         // Sécurité en cas d'erreur
@@ -2186,7 +2189,7 @@ case NODE_DIR_LIST:
             int idx = findVar(node->left->data.name);
             if (idx >= 0) {
                 if (vars[idx].is_locked) {
-                    printf("%s[SEC ERROR]%s Variable '%s' is already borrowed/locked!\n", COLOR_RED, COLOR_RESET, vars[idx].name);
+                    runtime_error(node, "Cannot not lock variable not found '%s'", variable_name);
                     return;
                 }
                 // Verrouillage
@@ -2230,13 +2233,12 @@ case NODE_DIR_LIST:
 static void run(const char* source, const char* filename) {
     initWorkingDir(filename);
     
-    printf("%s[EXEC]%s Working directory: %s\n", COLOR_CYAN, COLOR_RESET, current_working_dir);
-    
+        
     int count = 0;
     ASTNode** nodes = parse(source, &count);
     
     if (!nodes) {
-        printf("%s[EXEC ERROR]%s Parsing failed\n", COLOR_RED, COLOR_RESET);
+        runtime_error(node, "Cannot run '%s'", filename);
         return;
     }
     
@@ -2281,7 +2283,6 @@ static void run(const char* source, const char* filename) {
     
     // 3. ÉTAPE D'EXÉCUTION DU MAIN
     if (main_node) {
-        printf("%s[EXEC]%s Starting main function...\n", COLOR_BLUE, COLOR_RESET);
         execute(main_node);
     }
     
@@ -2390,7 +2391,7 @@ static void repl() {
 static char* loadFile(const char* filename) {
     FILE* f = fopen(filename, "r");
     if (!f) {
-        printf("%s[LOAD ERROR]%s Cannot open file: %s\n", COLOR_RED, COLOR_RESET, filename);
+        runtime_error(node, "Cannot assign to constant '%s'", target_name);
         return NULL;
     }
     
@@ -2438,7 +2439,7 @@ int main(int argc, char* argv[]) {
         // Check if first argument is a flag
         if (argv[1][0] == '-') {
             // It's a flag but not recognized, show error
-            printf("%s[ERROR]%s Unknown option: %s\n", COLOR_RED, COLOR_RESET, argv[1]);
+            runtime_error(node, "Cannot assign to constant '%s'", target_name);
             printf("Use %s--help%s for usage information.\n", COLOR_CYAN, COLOR_RESET);
             return 1;
         }
