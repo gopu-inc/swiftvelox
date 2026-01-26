@@ -1,9 +1,5 @@
-name: Notify Discord
-
+name: Notify Discord on Release
 on:
-  push:
-    branches:
-      - main
   release:
     types: [published, released]
 
@@ -11,29 +7,9 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - name: Send Discord notification on push
-        if: github.event_name == 'push'
+      - name: Send Discord notification
         run: |
           curl -H "Content-Type: application/json" \
           -X POST \
-          -d '{"embeds":[{"title":"📂 Nouveau commit sur main","description":"Auteur: '${{ github.actor }}' | Message: '${{ github.event.head_commit.message }}'","color":3066993,"thumbnail":{"url":"https://img.shields.io/badge/certifié-✅-brightgreen.svg"},"footer":{"text":"✅ Commit certifié"}}]}' \
-          https://discord.com/api/webhooks/1465454947968614526/-7OTF0_zc9q_EQ347Y5PhRRAOzyENISnvByDE_N1MzcUH7ILx8Ym19LJfh88pDq53iLT
-
-      - name: Send Discord notification on release
-        if: github.event_name == 'release'
-        run: |
-          curl -H "Content-Type: application/json" \
-          -X POST \
-          -d '{
-            "embeds": [{
-              "title": "🚀 Nouvelle release publiée",
-              "url": "${{ github.event.release.html_url }}",
-              "description": "Nom: '${{ github.event.release.name }}'",
-              "color": 15105570,
-              "thumbnail": {
-                "url": "https://img.shields.io/badge/release-🏅-orange.svg"
-              },
-              "footer": { "text": "🏅 Release certifiée" }
-            }]
-          }' \
+          -d "{\"content\":\"🚀 Nouvelle release publiée: ${{ github.event.release.name }} - ${{ github.event.release.html_url }}\"}" \
           https://discord.com/api/webhooks/1465454947968614526/-7OTF0_zc9q_EQ347Y5PhRRAOzyENISnvByDE_N1MzcUH7ILx8Ym19LJfh88pDq53iLT
