@@ -2126,10 +2126,7 @@ static ASTNode* typedefDeclaration() {
     }
     
     consume(TK_SEMICOLON, "Expected ';' after typedef");
-    
-    printf("%s[PARSER]%s Typedef '%s' defined\n", 
-           COLOR_CYAN, COLOR_RESET, type_name);
-    
+        
     return node;
 }
 
@@ -2588,7 +2585,7 @@ ASTNode** parse(const char* source, int* count) {
     int capacity = 100;
     ASTNode** nodes = malloc(capacity * sizeof(ASTNode*));
     if (!nodes) {
-        fprintf(stderr, "%s[PARSER FATAL]%s Memory allocation failed\n", COLOR_RED, COLOR_RESET);
+        fprintf(stderr, "%sPARSER FATAL%s Memory allocation failed\n", COLOR_RED, COLOR_RESET);
         return NULL;
     }
     
@@ -2599,7 +2596,7 @@ ASTNode** parse(const char* source, int* count) {
             capacity *= 2;
             ASTNode** new_nodes = realloc(nodes, capacity * sizeof(ASTNode*));
             if (!new_nodes) {
-                fprintf(stderr, "%s[PARSER FATAL]%s Memory reallocation failed\n", COLOR_RED, COLOR_RESET);
+                fprintf(stderr, "%sPARSER FATAL%s Memory reallocation failed\n", COLOR_RED, COLOR_RESET);
                 break;
             }
             nodes = new_nodes;
@@ -2616,11 +2613,11 @@ ASTNode** parse(const char* source, int* count) {
     }
     
     
-    printf("%s[PARSER]%s Errors: %d, Warnings: %d\n", 
+    printf("%sPARSER%s Errors: %d, Warnings: %d\n", 
            errorCount > 0 ? COLOR_RED : COLOR_GREEN, COLOR_RESET, errorCount, warningCount);
     
     if (errorCount > 0) {
-        printf("%s[PARSER]%s Parse completed with errors\n", COLOR_RED, COLOR_RESET);
+        printf("%sPARSER%s Parse completed with errors\n", COLOR_RED, COLOR_RESET);
     } else {
         
     }
