@@ -5,7 +5,7 @@ on:
     branches:
       - main
   release:
-    types: [published]
+    types: [published, released]
 
 jobs:
   notify:
@@ -16,7 +16,14 @@ jobs:
         run: |
           curl -H "Content-Type: application/json" \
           -X POST \
-          -d "{\"content\":\"📂 Un commit vient d’être poussé sur main par ${{ github.actor }} : ${{ github.event.head_commit.message }}\"}" \
+          -d '{
+            "embeds": [{
+              "title": "📂 Nouveau commit sur main",
+              "description": "Auteur: '${{ github.actor }}'\nMessage: '${{ github.event.head_commit.message }}'",
+              "color": 3066993,
+              "footer": { "text": "✅ Commit certifié" }
+            }]
+          }' \
           https://discord.com/api/webhooks/1465454947968614526/-7OTF0_zc9q_EQ347Y5PhRRAOzyENISnvByDE_N1MzcUH7ILx8Ym19LJfh88pDq53iLT
 
       - name: Send Discord notification on release
@@ -24,5 +31,13 @@ jobs:
         run: |
           curl -H "Content-Type: application/json" \
           -X POST \
-          -d "{\"content\":\"🚀 Nouvelle release publiée: ${{ github.event.release.name }} - ${{ github.event.release.html_url }}\"}" \
+          -d '{
+            "embeds": [{
+              "title": "🚀 Nouvelle release publiée",
+              "url": "${{ github.event.release.html_url }}",
+              "description": "Nom: '${{ github.event.release.name }}'",
+              "color": 15105570,
+              "footer": { "text": "🏅 Release certifiée" }
+            }]
+          }' \
           https://discord.com/api/webhooks/1465454947968614526/-7OTF0_zc9q_EQ347Y5PhRRAOzyENISnvByDE_N1MzcUH7ILx8Ym19LJfh88pDq53iLT
