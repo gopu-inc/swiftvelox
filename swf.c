@@ -110,8 +110,7 @@ static void registerExport(const char* symbol, const char* alias) {
         exports[export_count].module = str_copy(current_working_dir);
         export_count++;
         
-        printf("%s[EXPORT]%s Registered export: %s as %s\n", 
-               COLOR_GREEN, COLOR_RESET, symbol, alias);
+        
     }
 }
 
@@ -318,8 +317,8 @@ static void registerFunction(const char* name, ASTNode* params, ASTNode* body, i
         }
         
         func_count++;
-        printf("%s[FUNC REG]%s Function '%s' registered (%d parameters)\n", 
-               COLOR_GREEN, COLOR_RESET, name, param_count);
+
+        
     }
 }
 
