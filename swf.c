@@ -70,6 +70,7 @@ typedef struct {
     int scope_level;
     char* module;
     bool is_exported;
+    bool is_locked;
 } Variable;
 
 static Variable vars[1000];
@@ -469,11 +470,15 @@ static char* resolveModulePath(const char* import_path, const char* from_module)
 // ======================================================
 static bool loadAndExecuteModule(const char* import_path, const char* from_module, 
                                  bool import_named, char** named_symbols, int symbol_count) {
-    
+    if (strcmp(import_path, "sys") == 0 || strcmp(import_path, "http") == 0 || 
+        strcmp(import_path, "io") == 0 || strcmp(import_path, "json") == 0 || 
+        strcmp(import_path, "net") == 0 || strcmp(import_path, "std") == 0) {
+        return true; 
+    }
     // 1. Résoudre le chemin absolu
     char* full_path = resolveModulePath(import_path, from_module);
     if (!full_path) {
-        printf("%s[IMPORT ERROR]%s Module not found: %s\n", COLOR_RED, COLOR_RESET, import_path);
+        printf("%s[IMP][ERR]%s Module not found: %s\n", COLOR_RED, COLOR_RESET, import_path);
         return false;
     }
 
@@ -489,8 +494,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
             return true;
         }
         if (cache->status == MODULE_STATUS_LOADED) {
-            printf("%s[IMPORT INFO]%s Module already loaded (Cached): %s\n", 
-                   COLOR_CYAN, COLOR_RESET, import_path);
+            
             
             // On traite juste les imports nommés depuis le cache
             // (La logique de liaison des exports existants)
@@ -503,7 +507,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     // 3. Ajouter au cache en statut LOADING
     cache = addToCache(full_path, import_path);
     
-    printf("%s>>> LOADING MODULE: %s <<<%s\n", COLOR_MAGENTA, COLOR_RESET, full_path);
+    
 
     // 4. Lecture Fichier
     FILE* f = fopen(full_path, "r");
@@ -571,8 +575,7 @@ static bool loadAndExecuteModule(const char* import_path, const char* from_modul
     free(source);
     free(full_path);
 
-    printf("%s[IMPORT]%s Module loaded: %s\n", COLOR_GREEN, COLOR_RESET, import_path);
-    return true;
+        return true;
 }
 
 
@@ -1644,7 +1647,10 @@ case NODE_DIR_LIST:
         case NODE_ASSIGN: {
         char* target_name = NULL;
         bool is_prop = false;
-
+        if (vars[idx].is_locked) {
+                printf("%s[SEC ERROR]%s Cannot assign to locked variable '%s'\n", COLOR_RED, COLOR_RESET, vars[idx].name);
+                return;
+            }
         // 1. IDENTIFICATION DE LA CIBLE
         // Cas A : Assignation simple (x = 1)
         if (node->data.name) {
@@ -2047,7 +2053,7 @@ case NODE_DIR_LIST:
             // Optionnel : Retrouver la fonction et marquer comme async
             if (node->left->data.name) {
                 // Function* f = findFunction(node->left->data.name); // Variable supprimée pour éviter le warning
-                printf("%s[ASYNC]%s Registered async function: %s\n", COLOR_CYAN, COLOR_RESET, node->left->data.name);
+                
             }
         }
         break;
@@ -2072,18 +2078,134 @@ case NODE_DIR_LIST:
     break;
 } 
             
-        case NODE_FUNC_CALL:
-            evalFloat(node);
-            break;
-            
+
+
+    case NODE_FUNC_CALL: {
+        char* func_name = node->data.name;
+        char* prev_this = current_this; // Sauvegarde du contexte
         
+        // --- [OOP FIX] LOGIQUE APPEL METHODE (void) ---
+        char* dot = strchr(func_name, '.');
+        char real_func_name[256];
+        bool is_method = false;
+
+        if (dot) {
+            // Parsing "app.install" -> var="app", method="install"
+            int len = dot - func_name;
+            char var_name[128];
+            strncpy(var_name, func_name, len);
+            var_name[len] = '\0';
+            char* method = dot + 1;
+            
+            // 1. Trouver l'instance dans la variable
+            int idx = findVar(var_name);
+            if (idx >= 0 && vars[idx].is_string) {
+                char* instance_id = vars[idx].value.str_val; // ex: "inst_1"
+                
+                // 2. Trouver la classe de l'instance
+                char* cls = findClassOf(instance_id); // ex: "Zarch"
+                if (cls) {
+                    // 3. Rediriger vers "Zarch_install"
+                    snprintf(real_func_name, 256, "%s_%s", cls, method);
+                    func_name = real_func_name;
+                    
+                    // 4. Injecter 'this'
+                    current_this = instance_id;
+                    is_method = true;
+                }
+            }
+        }
+
+        Function* func = findFunction(func_name);
+        
+        if (func) {
+            Function* prev_func = current_function;
+            current_function = func;
+            
+            int old_scope = scope_level;
+            scope_level++;
+            
+            // --- PASSAGE ARGUMENTS ---
+            if (node->left && func->param_names) {
+                ASTNode* arg = node->left;
+                int param_idx = 0;
+                
+                while (arg && param_idx < func->param_count) {
+                    if (func->param_names[param_idx]) {
+                        if (var_count < 1000) {
+                            Variable* var = &vars[var_count];
+                            strncpy(var->name, func->param_names[param_idx], 99);
+                            var->name[99] = '\0';
+                            var->type = TK_VAR;
+                            var->scope_level = scope_level;
+                            var->is_constant = false;
+                            var->is_initialized = true;
+                            var->is_locked = false; // Par défaut non verrouillé
+                            
+                            // Évaluation de l'argument
+                            if (arg->type == NODE_STRING) {
+                                var->is_string = true;
+                                var->is_float = false;
+                                var->value.str_val = evalString(arg);
+                            } else {
+                                var->is_float = true;
+                                var->is_string = false;
+                                var->value.float_val = evalFloat(arg);
+                            }
+                            var_count++;
+                        }
+                    }
+                    arg = arg->right;
+                    param_idx++;
+                }
+            }
+            
+            // --- EXECUTION ---
+            func->has_returned = false;
+            if (func->body) execute(func->body);
+            
+            // --- NETTOYAGE ---
+            scope_level = old_scope;
+            current_function = prev_func;
+            
+            // Restauration du this pour les appels imbriqués
+            if (is_method) current_this = prev_this;
+            
+        } else {
+            printf("%s[EXEC ERROR]%s Function not found: %s\n", COLOR_RED, COLOR_RESET, func_name);
+        }
+        
+        // Sécurité en cas d'erreur
+        if (is_method && current_this != prev_this) current_this = prev_this;
+        break;
+    }
+            
+       case NODE_LOCK: {
+        // Syntaxe: lock(variable) { code... }
+        if (node->left && node->left->type == NODE_IDENT) {
+            int idx = findVar(node->left->data.name);
+            if (idx >= 0) {
+                if (vars[idx].is_locked) {
+                    printf("%s[SEC ERROR]%s Variable '%s' is already borrowed/locked!\n", COLOR_RED, COLOR_RESET, vars[idx].name);
+                    return;
+                }
+                // Verrouillage
+                vars[idx].is_locked = true;
+                
+                // Exécution du bloc sécurisé
+                execute(node->right);
+                
+                // Déverrouillage
+                vars[idx].is_locked = false;
+            }
+        }
+        break;
+    } 
             
         case NODE_TYPEDEF:
-            printf("%s[TYPEDEF]%s Type definition\n", COLOR_CYAN, COLOR_RESET);
             break;
             
         case NODE_JSON:
-            printf("%s[JSON]%s JSON data\n", COLOR_CYAN, COLOR_RESET);
             break;
             
         case NODE_BINARY:
