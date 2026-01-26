@@ -318,9 +318,7 @@ static void registerFunction(const char* name, ASTNode* params, ASTNode* body, i
         }
         
         func_count++;
-        printf("%s[FUNC REG]%s Function '%s' registered (%d parameters)\n", 
-               COLOR_GREEN, COLOR_RESET, name, param_count);
-    }
+            }
 }
 
 static Function* findFunction(const char* name) {
@@ -823,75 +821,86 @@ static double evalFloat(ASTNode* node) {
         }
             
         case NODE_FUNC_CALL: {
-            Function* func = findFunction(node->data.name);
-            if (func) {
-                Function* prev_func = current_function;
-                current_function = func;
+        char* func_name = node->data.name;
+        char* prev_this = current_this; 
+        char real_func_name[256];
+        bool is_method = false;
+
+        // --- LOGIQUE DE REDIRECTION OOP ---
+        char* dot = strchr(func_name, '.');
+        if (dot) {
+            int len = dot - func_name;
+            char var_name[128];
+            strncpy(var_name, func_name, len);
+            var_name[len] = '\0';
+            char* method_name = dot + 1;
+
+            // 1. Chercher la variable (ex: "app")
+            int v_idx = findVar(var_name);
+            if (v_idx >= 0 && vars[v_idx].is_string) {
+                char* inst_id = vars[v_idx].value.str_val; // ex: "inst_1"
                 
-                int old_scope = scope_level;
-                scope_level++;
-                
-                if (node->left && func->param_names) {
-                    ASTNode* arg = node->left;
-                    int param_idx = 0;
-                    
-                    while (arg && param_idx < func->param_count) {
-                        if (func->param_names[param_idx]) {
-                            if (var_count < 1000) {
-                                Variable* var = &vars[var_count];
-                                strncpy(var->name, func->param_names[param_idx], 99);
-                                var->name[99] = '\0';
-                                var->type = TK_VAR;
-                                var->size_bytes = 8;
-                                var->scope_level = scope_level;
-                                var->is_constant = false;
-                                var->is_initialized = true;
-                                
-                                double arg_val = evalFloat(arg);
-                                var->is_float = true;
-                                var->is_string = false;
-                                var->value.float_val = arg_val;
-                                
-                                var_count++;
-                            }
-                        }
-                        arg = arg->right;
-                        param_idx++;
-                    }
+                // 2. Trouver la classe de l'instance (ex: "Zarch")
+                char* cls = findClassOf(inst_id);
+                if (cls) {
+                    // 3. Transformer en "Zarch_install"
+                    snprintf(real_func_name, 256, "%s_%s", cls, method_name);
+                    func_name = real_func_name;
+                    current_this = inst_id; // Définit 'this'
+                    is_method = true;
                 }
-                
-                func->has_returned = false;
-                func->return_value = 0;
-                if (func->return_string) {
-                    free(func->return_string);
-                    func->return_string = NULL;
-                }
-                
-                if (func->body) {
-                    execute(func->body);
-                }
-                
-                scope_level = old_scope;
-                current_function = prev_func;
-                
-                if (func->return_string) {
-                    char* endptr;
-                    double val = strtod(func->return_string, &endptr);
-                    if (endptr != func->return_string) {
-                        return val;
-                    }
-                }
-                return func->return_value;
             }
-            
-            printf("%s[EXEC ERROR]%s Function not found: %s\n", COLOR_RED, COLOR_RESET, node->data.name);
-            return 0.0;
         }
-            
-        default:
-            return 0.0;
+
+        // --- RECHERCHE DE LA FONCTION ---
+        Function* func = findFunction(func_name);
+        if (!func) {
+            // Si c'est une erreur de méthode, on donne un message pro
+            if (is_method) {
+                runtime_error(node, "Method '%s' not found in class", func_name);
+            } else {
+                runtime_error(node, "Function '%s' not found", func_name);
+            }
+            return (node->type == NODE_FUNC_CALL) ? 0 : (size_t)NULL; 
+        }
+
+        // --- EXECUTION ---
+        Function* prev_func = current_function;
+        current_function = func;
+        int old_scope = scope_level;
+        scope_level++;
+
+        // Liaison des arguments
+        if (node->left && func->param_names) {
+            ASTNode* arg = node->left;
+            for (int i = 0; i < func->param_count && arg; i++) {
+                if (func->param_names[i]) {
+                    Variable* v = &vars[var_count++];
+                    strncpy(v->name, func->param_names[i], 99);
+                    v->scope_level = scope_level;
+                    v->is_initialized = true;
+                    if (arg->type == NODE_STRING) {
+                        v->is_string = true; v->value.str_val = evalString(arg);
+                    } else {
+                        v->is_float = true; v->value.float_val = evalFloat(arg);
+                    }
+                }
+                arg = arg->right;
+            }
+        }
+
+        func->has_returned = false;
+        if (func->body) execute(func->body);
+
+        // Nettoyage
+        scope_level = old_scope;
+        current_function = prev_func;
+        if (is_method) current_this = prev_this;
+
+        // Si on est dans evalFloat/evalString, on retourne la valeur
+        // (La logique de retour dépend de la fonction parente)
+        break;
     }
-}
 
 static char* evalString(ASTNode* node) {
     if (!node) return str_copy("");
@@ -2080,101 +2089,83 @@ case NODE_DIR_LIST:
 
     case NODE_FUNC_CALL: {
         char* func_name = node->data.name;
-        char* prev_this = current_this; // Sauvegarde du contexte
-        
-        // --- [OOP FIX] LOGIQUE APPEL METHODE (void) ---
-        char* dot = strchr(func_name, '.');
+        char* prev_this = current_this; 
         char real_func_name[256];
         bool is_method = false;
 
+        // --- LOGIQUE DE REDIRECTION OOP ---
+        char* dot = strchr(func_name, '.');
         if (dot) {
-            // Parsing "app.install" -> var="app", method="install"
             int len = dot - func_name;
             char var_name[128];
             strncpy(var_name, func_name, len);
             var_name[len] = '\0';
-            char* method = dot + 1;
-            
-            // 1. Trouver l'instance dans la variable
-            int idx = findVar(var_name);
-            if (idx >= 0 && vars[idx].is_string) {
-                char* instance_id = vars[idx].value.str_val; // ex: "inst_1"
+            char* method_name = dot + 1;
+
+            // 1. Chercher la variable (ex: "app")
+            int v_idx = findVar(var_name);
+            if (v_idx >= 0 && vars[v_idx].is_string) {
+                char* inst_id = vars[v_idx].value.str_val; // ex: "inst_1"
                 
-                // 2. Trouver la classe de l'instance
-                char* cls = findClassOf(instance_id); // ex: "Zarch"
+                // 2. Trouver la classe de l'instance (ex: "Zarch")
+                char* cls = findClassOf(inst_id);
                 if (cls) {
-                    // 3. Rediriger vers "Zarch_install"
-                    snprintf(real_func_name, 256, "%s_%s", cls, method);
+                    // 3. Transformer en "Zarch_install"
+                    snprintf(real_func_name, 256, "%s_%s", cls, method_name);
                     func_name = real_func_name;
-                    
-                    // 4. Injecter 'this'
-                    current_this = instance_id;
+                    current_this = inst_id; // Définit 'this'
                     is_method = true;
                 }
             }
         }
 
+        // --- RECHERCHE DE LA FONCTION ---
         Function* func = findFunction(func_name);
-        
-        if (func) {
-            Function* prev_func = current_function;
-            current_function = func;
-            
-            int old_scope = scope_level;
-            scope_level++;
-            
-            // --- PASSAGE ARGUMENTS ---
-            if (node->left && func->param_names) {
-                ASTNode* arg = node->left;
-                int param_idx = 0;
-                
-                while (arg && param_idx < func->param_count) {
-                    if (func->param_names[param_idx]) {
-                        if (var_count < 1000) {
-                            Variable* var = &vars[var_count];
-                            strncpy(var->name, func->param_names[param_idx], 99);
-                            var->name[99] = '\0';
-                            var->type = TK_VAR;
-                            var->scope_level = scope_level;
-                            var->is_constant = false;
-                            var->is_initialized = true;
-                            var->is_locked = false; // Par défaut non verrouillé
-                            
-                            // Évaluation de l'argument
-                            if (arg->type == NODE_STRING) {
-                                var->is_string = true;
-                                var->is_float = false;
-                                var->value.str_val = evalString(arg);
-                            } else {
-                                var->is_float = true;
-                                var->is_string = false;
-                                var->value.float_val = evalFloat(arg);
-                            }
-                            var_count++;
-                        }
-                    }
-                    arg = arg->right;
-                    param_idx++;
-                }
+        if (!func) {
+            // Si c'est une erreur de méthode, on donne un message pro
+            if (is_method) {
+                runtime_error(node, "Method '%s' not found in class", func_name);
+            } else {
+                runtime_error(node, "Function '%s' not found", func_name);
             }
-            
-            // --- EXECUTION ---
-            func->has_returned = false;
-            if (func->body) execute(func->body);
-            
-            // --- NETTOYAGE ---
-            scope_level = old_scope;
-            current_function = prev_func;
-            
-            // Restauration du this pour les appels imbriqués
-            if (is_method) current_this = prev_this;
-            
-        } else {
-            printf(node, "function not exec '%s'", func_name);
+            return (node->type == NODE_FUNC_CALL) ? 0 : (size_t)NULL; 
         }
-        
-        // Sécurité en cas d'erreur
-        if (is_method && current_this != prev_this) current_this = prev_this;
+
+        // --- EXECUTION ---
+        Function* prev_func = current_function;
+        current_function = func;
+        int old_scope = scope_level;
+        scope_level++;
+
+        // Liaison des arguments
+        if (node->left && func->param_names) {
+            ASTNode* arg = node->left;
+            for (int i = 0; i < func->param_count && arg; i++) {
+                if (func->param_names[i]) {
+                    Variable* v = &vars[var_count++];
+                    strncpy(v->name, func->param_names[i], 99);
+                    v->scope_level = scope_level;
+                    v->is_initialized = true;
+                    if (arg->type == NODE_STRING) {
+                        v->is_string = true; v->value.str_val = evalString(arg);
+                    } else {
+                        v->is_float = true; v->value.float_val = evalFloat(arg);
+                    }
+                }
+                arg = arg->right;
+            }
+        }
+
+        func->has_returned = false;
+        if (func->body) execute(func->body);
+
+        // Nettoyage
+        scope_level = old_scope;
+        current_function = prev_func;
+        if (is_method) current_this = prev_this;
+
+        // Si on est dans evalFloat/evalString, on retourne la valeur
+        // (La logique de retour dépend de la fonction parente)
         break;
     }
             
