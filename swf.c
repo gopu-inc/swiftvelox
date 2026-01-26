@@ -619,6 +619,14 @@ static double evalFloat(ASTNode* node) {
 
         // DANS evalFloat(ASTNode* node)
 
+     // Dans swf.c, fonction evalFloat()
+    case NODE_PATH_EXISTS: {
+        char* path = evalString(node->left);
+        // Utilise la fonction booléenne de io.c
+        bool res = (access(path, F_OK) == 0); 
+        if (path) free(path);
+        return res ? 1.0 : 0.0;
+    }   
     case NODE_AWAIT: {
         if (node->left) {
             return evalFloat(node->left);
@@ -1501,10 +1509,7 @@ case NODE_FILE_CLOSE:
     io_close(node);
     break;
     
-case NODE_FILE_READ:
-    io_read(node);
-    break;
-    
+
 case NODE_FILE_WRITE:
     io_write(node);
     break;
@@ -1515,10 +1520,6 @@ case NODE_FILE_SEEK:
     
 case NODE_FILE_TELL:
     io_tell(node);
-    break;
-    
-case NODE_PATH_EXISTS:
-    io_exists(node);
     break;
     
 case NODE_PATH_ISFILE:
