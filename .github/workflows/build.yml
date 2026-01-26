@@ -11,9 +11,18 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - name: Send Discord notification
+      - name: Notify on Release
+        if: github.event_name == 'release'
         run: |
           curl -H "Content-Type: application/json" \
           -X POST \
           -d "{\"content\":\"🚀 Nouvelle release publiée: ${{ github.event.release.name }} - ${{ github.event.release.html_url }}\"}" \
+          https://discord.com/api/webhooks/1465454947968614526/-7OTF0_zc9q_EQ347Y5PhRRAOzyENISnvByDE_N1MzcUH7ILx8Ym19LJfh88pDq53iLT
+
+      - name: Notify on Push to Main
+        if: github.event_name == 'push'
+        run: |
+          curl -H "Content-Type: application/json" \
+          -X POST \
+          -d "{\"content\":\"📌 Nouveau commit poussé sur main: ${{ github.sha }} par ${{ github.actor }}\"}" \
           https://discord.com/api/webhooks/1465454947968614526/-7OTF0_zc9q_EQ347Y5PhRRAOzyENISnvByDE_N1MzcUH7ILx8Ym19LJfh88pDq53iLT
