@@ -1226,7 +1226,7 @@ case NODE_WELD: {
         if (is_method) current_this = prev_this;
         return str_copy("");
     }
-    }
+    
 static bool evalBool(ASTNode* node) {
     if (!node) return false;
     
