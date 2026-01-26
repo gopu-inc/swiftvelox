@@ -855,7 +855,13 @@ static char* evalString(ASTNode* node) {
     if (!node) return str_copy("");
     
     switch (node->type) {
-        // DANS evalString(ASTNode* node)
+        // Dans swf.c, fonction evalString()
+    case NODE_FILE_READ: {
+        char* path = evalString(node->left);
+        char* content = io_read_string(path); // Fonction définie dans io.c
+        if (path) free(path);
+        return content ? content : str_copy("");
+    }
         case NODE_STD_TO_STR: {
             double val = evalFloat(node->left);
             char* buf = malloc(64);
