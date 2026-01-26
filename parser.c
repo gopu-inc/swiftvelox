@@ -92,8 +92,7 @@ static Token consume(TokenKind kind, const char* message) {
 static void synchronize() {
     panicMode = false;
     
-    fprintf(stderr, "%s[PARSER]%s Synchronizing...\n", COLOR_YELLOW, COLOR_RESET);
-    
+        
     while (current.kind != TK_EOF) {
         if (previous.kind == TK_SEMICOLON) return;
         
@@ -1857,8 +1856,7 @@ static ASTNode* functionDeclaration(bool is_exported) {
     }
     
     if (is_exported) {
-        printf("%s[PARSER]%s Exporting function: %s\n", 
-               COLOR_GREEN, COLOR_RESET, func_name);
+        
     }
     
     // Parse body
@@ -1892,9 +1890,7 @@ static ASTNode* functionDeclaration(bool is_exported) {
     
     node->right = body_node;
     
-    printf("%s[PARSER]%s Function '%s' declared with %d parameters\n", 
-           COLOR_GREEN, COLOR_RESET, func_name, param_count);
-    
+        
     return node;
 }
 
@@ -2041,9 +2037,7 @@ static ASTNode* classDeclaration() {
     
     node->data.class_def.members = first_member;
     
-    printf("%s[PARSER]%s Class '%s' defined\n", 
-           COLOR_MAGENTA, COLOR_RESET, class_name);
-    
+        
     return node;
 }
 
@@ -2103,9 +2097,7 @@ static ASTNode* enumDeclaration() {
     
     node->left = first_variant;
     
-    printf("%s[PARSER]%s Enum '%s' defined\n", 
-           COLOR_MAGENTA, COLOR_RESET, enum_name);
-    
+        
     return node;
 }
 
@@ -2174,9 +2166,7 @@ static ASTNode* namespaceDeclaration() {
     
     node->left = first_decl;
     
-    printf("%s[PARSER]%s Namespace '%s' defined\n", 
-           COLOR_CYAN, COLOR_RESET, ns_name);
-    
+        
     return node;
 }
 
@@ -2366,8 +2356,7 @@ static ASTNode* mainDeclaration() {
     
     node->left = block();
     
-    printf("%s[PARSER]%s Main function parsed\n", COLOR_BLUE, COLOR_RESET);
-    
+        
     return node;
 }
 
@@ -2595,8 +2584,7 @@ ASTNode** parse(const char* source, int* count) {
     warningCount = 0;
     scope_level = 0;
     
-    printf("%s[PARSER]%s Starting parse...\n", COLOR_CYAN, COLOR_RESET);
-    
+        
     int capacity = 100;
     ASTNode** nodes = malloc(capacity * sizeof(ASTNode*));
     if (!nodes) {
@@ -2627,15 +2615,14 @@ ASTNode** parse(const char* source, int* count) {
         }
     }
     
-    printf("%s[PARSER]%s Parse complete. %d declarations parsed.\n", 
-           COLOR_CYAN, COLOR_RESET, *count);
+    
     printf("%s[PARSER]%s Errors: %d, Warnings: %d\n", 
            errorCount > 0 ? COLOR_RED : COLOR_GREEN, COLOR_RESET, errorCount, warningCount);
     
     if (errorCount > 0) {
         printf("%s[PARSER]%s Parse completed with errors\n", COLOR_RED, COLOR_RESET);
     } else {
-        printf("%s[PARSER]%s Parse successful\n", COLOR_GREEN, COLOR_RESET);
+        
     }
     
     return nodes;
