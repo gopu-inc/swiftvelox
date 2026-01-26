@@ -19,8 +19,11 @@ jobs:
           -d '{
             "embeds": [{
               "title": "📂 Nouveau commit sur main",
-              "description": "Auteur: '${{ github.actor }}'\nMessage: '${{ github.event.head_commit.message }}'",
+              "description": "Auteur: '${{ github.actor }}' | Message: '${{ github.event.head_commit.message }}'",
               "color": 3066993,
+              "thumbnail": {
+                "url": "https://img.shields.io/badge/certifié-✅-brightgreen.svg"
+              },
               "footer": { "text": "✅ Commit certifié" }
             }]
           }' \
@@ -37,6 +40,9 @@ jobs:
               "url": "${{ github.event.release.html_url }}",
               "description": "Nom: '${{ github.event.release.name }}'",
               "color": 15105570,
+              "thumbnail": {
+                "url": "https://img.shields.io/badge/release-🏅-orange.svg"
+              },
               "footer": { "text": "🏅 Release certifiée" }
             }]
           }' \
