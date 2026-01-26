@@ -2189,7 +2189,7 @@ case NODE_DIR_LIST:
             int idx = findVar(node->left->data.name);
             if (idx >= 0) {
                 if (vars[idx].is_locked) {
-                    printf("Cannot not lock ",);
+                    printf("Cannot not lock ");
                     return;
                 }
                 // Verrouillage
@@ -2238,7 +2238,7 @@ static void run(const char* source, const char* filename) {
     ASTNode** nodes = parse(source, &count);
     
     if (!nodes) {
-        runtime_error(node, "Cannot run '%s'", filename);
+        printf("Cannot run '%s'", filename);
         return;
     }
     
