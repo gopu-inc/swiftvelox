@@ -625,6 +625,19 @@ static double evalFloat(ASTNode* node) {
         }
         return 0.0;
     }
+        case NODE_STD_LEN: {
+            // Retourne la longueur d'une string ou d'un tableau (simplifié string ici)
+            char* val = evalString(node->left);
+            int len = val ? strlen(val) : 0;
+            if (val) free(val);
+            return (double)len;
+        }
+        case NODE_STD_TO_INT: {
+            char* val = evalString(node->left);
+            double res = val ? atof(val) : 0;
+            if (val) free(val);
+            return res;
+        }
         case NODE_SYS_EXEC: {
             char* cmd = evalString(node->left);
             // sys_exec_int est une nouvelle fonction dans sys.c qui retourne le int
@@ -835,6 +848,26 @@ static char* evalString(ASTNode* node) {
     
     switch (node->type) {
         // DANS evalString(ASTNode* node)
+        case NODE_STD_TO_STR: {
+            double val = evalFloat(node->left);
+            char* buf = malloc(64);
+            // Gestion propre des entiers vs flottants
+            if (val == (int64_t)val) sprintf(buf, "%lld", (int64_t)val);
+            else sprintf(buf, "%g", val);
+            return buf;
+        }
+        case NODE_STD_SPLIT: {
+            // Version simplifiée : retourne le premier élément pour l'instant
+            // Idéalement, il faudrait implémenter le type ARRAY complet dans evalString
+            // Pour zarch, on a souvent besoin de "couper" (ex: "gopu/math" -> "math")
+            char* str = evalString(node->left);
+            char* delim = evalString(node->right);
+            char* token = strtok(str, delim);
+            char* res = token ? str_copy(token) : str_copy("");
+            if (str) free(str);
+            if (delim) free(delim);
+            return res;
+        }
 case NODE_WELD: {
     char* prompt = NULL;
     if (node->left) {
