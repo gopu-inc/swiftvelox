@@ -2075,43 +2075,46 @@ case NODE_DIR_LIST:
     break;
 } 
             
-
-
-    case NODE_FUNC_CALL: {
+       case NODE_FUNC_CALL: {
         char* func_name = node->data.name;
-        char* prev_this = current_this; // Sauvegarde du contexte
-        
-        // --- [OOP FIX] LOGIQUE APPEL METHODE (void) ---
-        char* dot = strchr(func_name, '.');
+        char* prev_this = current_this; 
         char real_func_name[256];
         bool is_method = false;
 
+        // ====================================================
+        // [FIX OOP] LOGIQUE DE REDIRECTION MÉTHODE
+        // ====================================================
+        char* dot = strchr(func_name, '.');
+        
         if (dot) {
-            // Parsing "app.install" -> var="app", method="install"
+            // On sépare l'objet et la méthode (ex: "app" et "install")
             int len = dot - func_name;
             char var_name[128];
             strncpy(var_name, func_name, len);
             var_name[len] = '\0';
-            char* method = dot + 1;
+            char* method_name = dot + 1;
+
+            // 1. On cherche la variable "app" pour avoir son ID d'instance
+            int v_idx = findVar(var_name);
             
-            // 1. Trouver l'instance dans la variable
-            int idx = findVar(var_name);
-            if (idx >= 0 && vars[idx].is_string) {
-                char* instance_id = vars[idx].value.str_val; // ex: "inst_1"
+            if (v_idx >= 0 && vars[v_idx].is_string) {
+                char* inst_id = vars[v_idx].value.str_val; // ex: "inst_1"
                 
-                // 2. Trouver la classe de l'instance
-                char* cls = findClassOf(instance_id); // ex: "Zarch"
+                // 2. On cherche la classe de cette instance
+                char* cls = findClassOf(inst_id); // ex: "Zarch"
+                
                 if (cls) {
-                    // 3. Rediriger vers "Zarch_install"
-                    snprintf(real_func_name, 256, "%s_%s", cls, method);
+                    // 3. On construit le nom interne "Zarch_install"
+                    snprintf(real_func_name, 256, "%s_%s", cls, method_name);
                     func_name = real_func_name;
                     
-                    // 4. Injecter 'this'
-                    current_this = instance_id;
+                    // 4. On définit le contexte 'this'
+                    current_this = inst_id;
                     is_method = true;
                 }
             }
         }
+        // ====================================================
 
         Function* func = findFunction(func_name);
         
@@ -2122,7 +2125,7 @@ case NODE_DIR_LIST:
             int old_scope = scope_level;
             scope_level++;
             
-            // --- PASSAGE ARGUMENTS ---
+            // Passage des arguments
             if (node->left && func->param_names) {
                 ASTNode* arg = node->left;
                 int param_idx = 0;
@@ -2132,21 +2135,17 @@ case NODE_DIR_LIST:
                         if (var_count < 1000) {
                             Variable* var = &vars[var_count];
                             strncpy(var->name, func->param_names[param_idx], 99);
-                            var->name[99] = '\0';
                             var->type = TK_VAR;
                             var->scope_level = scope_level;
                             var->is_constant = false;
                             var->is_initialized = true;
-                            var->is_locked = false; // Par défaut non verrouillé
                             
                             // Évaluation de l'argument
                             if (arg->type == NODE_STRING) {
                                 var->is_string = true;
-                                var->is_float = false;
                                 var->value.str_val = evalString(arg);
                             } else {
                                 var->is_float = true;
-                                var->is_string = false;
                                 var->value.float_val = evalFloat(arg);
                             }
                             var_count++;
@@ -2157,23 +2156,27 @@ case NODE_DIR_LIST:
                 }
             }
             
-            // --- EXECUTION ---
+            // Exécution
             func->has_returned = false;
-            if (func->body) execute(func->body);
+            if (func->body) {
+                execute(func->body);
+            }
             
-            // --- NETTOYAGE ---
+            // Restauration
             scope_level = old_scope;
             current_function = prev_func;
             
-            // Restauration du this pour les appels imbriqués
             if (is_method) current_this = prev_this;
             
         } else {
-            printf(node, "function not exec '%s'", func_name);
+            // Affichage d'erreur propre
+            // Utilise runtime_error si tu l'as ajoutée, sinon printf simple
+            fprintf(stderr, "\033[31m[RUNTIME ERROR]\033[0m Function or method not found: '%s'\n", func_name);
+            exit(1);
         }
         
-        // Sécurité en cas d'erreur
-        if (is_method && current_this != prev_this) current_this = prev_this;
+        // Sécurité
+        if (is_method) current_this = prev_this;
         break;
     }
             
