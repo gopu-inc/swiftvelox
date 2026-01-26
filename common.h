@@ -300,6 +300,9 @@ typedef enum {
     NODE_NET_CLOSE,
     // expression
     NODE_INT,
+    NODE_NONLOCAL,
+    NODE_LOCK,
+    NODE_BDD,
     NODE_FLOAT,
     NODE_STRING,
     NODE_BOOL,
