@@ -997,3 +997,35 @@ void init_io_module() {
     printf("%s[IO MODULE]%s Initialized with %d file descriptors\n", 
            COLOR_GREEN, COLOR_RESET, fd_count);
 }
+// Ajoute ceci à la fin de io.c
+
+// Vérifie si un fichier existe et retourne true/false
+bool io_exists_bool(const char* path) {
+    if (!path) return false;
+    // access() retourne 0 si le fichier existe
+    return (access(path, F_OK) == 0);
+}
+
+// Lit tout le contenu d'un fichier et le retourne sous forme de string
+char* io_read_string(const char* path) {
+    if (!path) return NULL;
+    
+    FILE* f = fopen(path, "rb"); // "rb" pour lire aussi les fichiers binaires/images
+    if (!f) return NULL;
+    
+    // Calculer la taille
+    fseek(f, 0, SEEK_END);
+    long length = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    // Allouer la mémoire (+1 pour le caractère de fin de chaîne \0)
+    char* buffer = malloc(length + 1);
+    if (buffer) {
+        fread(buffer, 1, length, f);
+        buffer[length] = '\0';
+    }
+    
+    fclose(f);
+    return buffer;
+}
+

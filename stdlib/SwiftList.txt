@@ -1,0 +1,2 @@
+# SwiftFlow Dependencies List
+# Format: @scope/package version

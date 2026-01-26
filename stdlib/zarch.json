@@ -1,0 +1,11 @@
+{
+    "name": "stdlib",
+    "version": "1.0.0",
+    "description": "A SwiftFlow package",
+    "main": "src/main.swf",
+    "author": "",
+    "license": "MIT",
+    "scope": "user",
+    "build": "all",
+    "markdown": []
+}

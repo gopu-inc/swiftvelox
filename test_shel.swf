@@ -1,0 +1,6 @@
+#!/usr/bin/env swift
+
+main() {
+    print("Je suis un exécutable système !");
+    print("Arguments : ", sys.argv(0));
+}
