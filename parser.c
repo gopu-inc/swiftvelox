@@ -39,7 +39,7 @@ static void errorAt(Token token, const char* message) {
     panicMode = true;
     
     if (errorCount >= 3) {
-        fprintf(stderr, "%s[PARSER FATAL]%s Too many errors (%d). Stopping.\n", 
+        fprintf(stderr, "%sPARSER FATAL%s Too many errors (%d). Stopping.\n", 
                 COLOR_BRIGHT_RED, COLOR_RESET, errorCount);
         exit(1);
     }
@@ -55,7 +55,7 @@ static void errorAtCurrent(const char* message) {
 
 static void warningAt(Token token, const char* message) {
     warningCount++;
-    fprintf(stderr, "%s[PARSER WARNING]%s Line %d, Col %d: %s\n", 
+    fprintf(stderr, "%sPARSER WARNING%s Line %d, Col %d: %s\n", 
             COLOR_YELLOW, COLOR_RESET, token.line, token.column, message);
 }
 
@@ -136,7 +136,7 @@ static void synchronize() {
 static ASTNode* newNode(NodeType type) {
     ASTNode* node = calloc(1, sizeof(ASTNode));
     if (!node) {
-        fprintf(stderr, "%s[PARSER FATAL]%s Memory allocation failed for AST node\n", 
+        fprintf(stderr, "%sPARSER FATAL%s Memory allocation failed for AST node\n", 
                 COLOR_BRIGHT_RED, COLOR_RESET);
         exit(1);
     }
