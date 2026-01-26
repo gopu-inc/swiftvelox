@@ -2175,7 +2175,7 @@ case NODE_DIR_LIST:
             if (is_method) current_this = prev_this;
             
         } else {
-            runtime_error(node, "Cannot assign to constant '%s'", target_name);
+            printf(node, "function not exec '%s'", func_name);
         }
         
         // Sécurité en cas d'erreur
@@ -2189,7 +2189,7 @@ case NODE_DIR_LIST:
             int idx = findVar(node->left->data.name);
             if (idx >= 0) {
                 if (vars[idx].is_locked) {
-                    runtime_error(node, "Cannot not lock variable not found '%s'", variable_name);
+                    printf("Cannot not lock ",);
                     return;
                 }
                 // Verrouillage
