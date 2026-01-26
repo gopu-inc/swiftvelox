@@ -2514,6 +2514,37 @@ static ASTNode* netCloseStatement() {
     return node;
 }
 static ASTNode* statement() {
+    if (check(TK_IDENT)) {
+    const char* module_name = current.value.str_val;
+    Token start_token = current; // Sauvegarde pour revenir en arrière si ce n'est pas un appel natif
+
+    // --- MODULE 'io' ---
+    if (strcmp(module_name, "io") == 0) {
+        advance(); // Consomme "io"
+        if (match(TK_PERIOD)) {
+            if (match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                if (strcmp(cmd, "open") == 0) return ioOpenStatement();
+                if (strcmp(cmd, "close") == 0) return ioCloseStatement();
+                if (strcmp(cmd, "read") == 0) return ioReadStatement();
+                if (strcmp(cmd, "write") == 0) return ioWriteStatement();
+                if (strcmp(cmd, "seek") == 0) return ioSeekStatement();
+                if (strcmp(cmd, "tell") == 0) return ioTellStatement();
+                if (strcmp(cmd, "flush") == 0) return ioFlushStatement();
+                if (strcmp(cmd, "exists") == 0) return ioExistsStatement();
+                if (strcmp(cmd, "isfile") == 0) return ioIsfileStatement();
+                if (strcmp(cmd, "isdir") == 0) return ioIsdirStatement();
+                if (strcmp(cmd, "mkdir") == 0) return ioMkdirStatement();
+                if (strcmp(cmd, "rmdir") == 0) return ioRmdirStatement();
+                if (strcmp(cmd, "listdir") == 0) return ioListdirStatement();
+                if (strcmp(cmd, "remove") == 0) return ioRemoveStatement();
+                if (strcmp(cmd, "rename") == 0) return ioRenameStatement();
+                if (strcmp(cmd, "copy") == 0) return ioCopyStatement();
+            }
+        }
+        // Si ce n'est pas un appel natif reconnu (ex: var my_io = {..}), on annule
+        current = start_token;
+    }
     if (match(TK_PRINT)) return printStatement();
     if (match(TK_PRINT_DB)) {
         warningAt(previous, "printdb not implemented, using print");
