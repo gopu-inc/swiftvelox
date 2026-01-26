@@ -885,23 +885,22 @@ static char* evalString(ASTNode* node) {
     
     switch (node->type) {
     
-
+    // --- INSTANCIATION ---
     case NODE_NEW: {
         static int instance_id = 0;
         char instance_name[64];
         sprintf(instance_name, "inst_%d", ++instance_id);
         
-        // [NOUVEAU] On lie l'instance à sa classe
+        // On lie l'instance à sa classe
         registerInstance(instance_name, node->data.name);
         
         return str_copy(instance_name);
     }
 
+    // --- ACCÈS MEMBRE ---
     case NODE_MEMBER_ACCESS: {
-        // Gestion de this.prop ou obj.prop
         char* obj_name = NULL;
         
-        // Si c'est 'this', on utilise le contexte actuel
         if (node->left->type == NODE_THIS) {
             if (current_this) obj_name = str_copy(current_this);
             else return str_copy("");
@@ -923,228 +922,191 @@ static char* evalString(ASTNode* node) {
         }
         return str_copy("");
     }
+
+    // --- IO ---
     case NODE_FILE_READ: {
         char* path = evalString(node->left);
-        char* content = io_read_string(path); // Fonction définie dans io.c
+        char* content = io_read_string(path); 
         if (path) free(path);
         return content ? content : str_copy("");
     }
-        case NODE_STD_TO_STR: {
-            double val = evalFloat(node->left);
-            char* buf = malloc(64);
-            // Gestion propre des entiers vs flottants
-            if (val == (int64_t)val) sprintf(buf, "%lld", (int64_t)val);
-            else sprintf(buf, "%g", val);
-            return buf;
-        }
-        case NODE_STD_SPLIT: {
-            // Version simplifiée : retourne le premier élément pour l'instant
-            // Idéalement, il faudrait implémenter le type ARRAY complet dans evalString
-            // Pour zarch, on a souvent besoin de "couper" (ex: "gopu/math" -> "math")
-            char* str = evalString(node->left);
-            char* delim = evalString(node->right);
-            char* token = strtok(str, delim);
-            char* res = token ? str_copy(token) : str_copy("");
-            if (str) free(str);
-            if (delim) free(delim);
-            return res;
-        }
-case NODE_WELD: {
-    char* prompt = NULL;
-    if (node->left) {
-        prompt = evalString(node->left);
-    }
-    
-    
-    // On utilise la fonction helper existante
-    char* input = weldInput(prompt);
-    
-    if (prompt) free(prompt);
-    
-    // On retourne la chaîne saisie
-    return input ? input : str_copy("");
-}
-        // DANS evalString(ASTNode* node) ou un nouvel evalGeneric
 
-    // --- LAMBDA (Fonctions anonymes) ---
+    case NODE_WELD: {
+        char* prompt = NULL;
+        if (node->left) {
+            prompt = evalString(node->left);
+        }
+        char* input = weldInput(prompt);
+        if (prompt) free(prompt);
+        return input ? input : str_copy("");
+    }
+
+    // --- STD ---
+    case NODE_STD_TO_STR: {
+        double val = evalFloat(node->left);
+        char* buf = malloc(64);
+        if (val == (int64_t)val) sprintf(buf, "%lld", (int64_t)val);
+        else sprintf(buf, "%g", val);
+        return buf;
+    }
+
+    case NODE_STD_SPLIT: {
+        char* str = evalString(node->left);
+        char* delim = evalString(node->right);
+        char* token = strtok(str, delim);
+        char* res = token ? str_copy(token) : str_copy("");
+        if (str) free(str);
+        if (delim) free(delim);
+        return res;
+    }
+
+    // --- LAMBDA ---
     case NODE_LAMBDA: {
-        // Stratégie : On transforme la lambda en une fonction nommée "__lambda_123"
-        // et on retourne son nom. L'appelant pourra faire call("__lambda_123")
-        
         char* anon_name = generateLambdaName();
-        
-        // Calcul du nombre de paramètres
         int param_count = 0;
-        ASTNode* param = node->left; // Paramètres de la lambda
+        ASTNode* param = node->left;
         while (param) {
             param_count++;
             param = param->right;
         }
-        
-        // Enregistrement comme une fonction normale
         registerFunction(anon_name, node->left, node->right, param_count);
-        
-        printf("%s[LAMBDA]%s Created anonymous function: %s\n", COLOR_CYAN, COLOR_RESET, anon_name);
-        return anon_name; // On retourne le nom pour qu'il soit stocké dans une variable
+        return anon_name;
     }
 
     // --- AWAIT ---
     case NODE_AWAIT: {
-        // Dans une implémentation synchrone simple, await exécute juste l'expression.
-        // ex: var x = await fetch(); -> var x = fetch();
         if (node->left) {
-            // Si c'est un appel de fonction qui retourne une string
             return evalString(node->left);
         }
         return str_copy("");
     }
-        case NODE_HTTP_GET: {
-            char* url = evalString(node->left);
-            char* res = http_get(url);
-            if (url) free(url);
-            return res ? res : str_copy("");
+
+    // --- HTTP & JSON & SYS ---
+    case NODE_HTTP_GET: {
+        char* url = evalString(node->left);
+        char* res = http_get(url);
+        if (url) free(url);
+        return res ? res : str_copy("");
+    }
+    case NODE_HTTP_POST: {
+        char* url = evalString(node->left);
+        char* data = evalString(node->right);
+        char* res = http_post(url, data);
+        if (url) free(url);
+        if (data) free(data);
+        return res ? res : str_copy("");
+    }
+    case NODE_HTTP_DOWNLOAD: {
+        char* url = evalString(node->left);
+        char* out = evalString(node->right);
+        char* res = http_download(url, out);
+        if (url) free(url);
+        if (out) free(out);
+        return res ? res : str_copy("failed");
+    }
+    case NODE_SYS_ARGV: {
+        int idx = (int)evalFloat(node->left);
+        char* arg = sys_get_argv(idx); 
+        return arg ? str_copy(arg) : NULL;
+    }
+    case NODE_JSON_GET: {
+        char* json = evalString(node->left);
+        char* key = evalString(node->right);
+        char* res = json_extract(json, key);
+        if (json) free(json);
+        if (key) free(key);
+        return res ? res : NULL;
+    }
+
+    // --- NET ---
+    case NODE_NET_RECV: {
+        int fd = (int)evalFloat(node->left);
+        int size = 1024;
+        if (node->right) size = (int)evalFloat(node->right);
+        char* res = net_recv_data(fd, size);
+        if (res) return res;
+        return str_copy("");
+    }
+
+    // --- BASIC TYPES ---
+    case NODE_STRING:
+        return str_copy(node->data.str_val);
+        
+    case NODE_INT: {
+        char* result = malloc(32);
+        if (result) sprintf(result, "%lld", node->data.int_val);
+        return result ? result : str_copy("");
+    }
+        
+    case NODE_FLOAT: {
+        char* result = malloc(32);
+        if (result) {
+            double val = node->data.float_val;
+            if (isnan(val)) strcpy(result, "nan");
+            else if (isinf(val)) strcpy(result, val > 0 ? "inf" : "-inf");
+            else if (fabs(val - (int64_t)val) < 1e-10) sprintf(result, "%lld", (int64_t)val);
+            else sprintf(result, "%g", val);
         }
-        case NODE_HTTP_POST: {
-            char* url = evalString(node->left);
-            char* data = evalString(node->right);
-            char* res = http_post(url, data);
-            if (url) free(url);
-            if (data) free(data);
-            return res ? res : str_copy("");
-        }
-        case NODE_HTTP_DOWNLOAD: {
-            char* url = evalString(node->left);
-            char* out = evalString(node->right);
-            char* res = http_download(url, out);
-            if (url) free(url);
-            if (out) free(out);
-            return res ? res : str_copy("failed");
-        }
-        case NODE_SYS_ARGV: {
-            int idx = (int)evalFloat(node->left);
-            // On suppose une fonction sys_get_argv(idx) dans sys.c
-            char* arg = sys_get_argv(idx); 
-            return arg ? str_copy(arg) : NULL;
-        }
-        case NODE_JSON_GET: {
-            char* json = evalString(node->left);
-            char* key = evalString(node->right);
-            // On suppose une fonction json_extract(json, key) dans json.c
-            char* res = json_extract(json, key);
-            if (json) free(json);
-            if (key) free(key);
-            return res ? res : NULL;
-        }
-        case NODE_NET_RECV: {
-            int fd = (int)evalFloat(node->left); // Évaluation du FD
-            int size = 1024;
-            if (node->right) size = (int)evalFloat(node->right);
-            
-            char* res = net_recv_data(fd, size);
-            if (res) return res;
-            return str_copy("");
-        }
-        case NODE_STRING:
-            return str_copy(node->data.str_val);
-            
-        case NODE_INT: {
-            char* result = malloc(32);
-            if (result) sprintf(result, "%lld", node->data.int_val);
-            return result ? result : str_copy("");
-        }
-            
-        case NODE_FLOAT: {
-            char* result = malloc(32);
-            if (result) {
-                double val = node->data.float_val;
-                if (isnan(val)) {
-                    strcpy(result, "nan");
-                } else if (isinf(val)) {
-                    strcpy(result, val > 0 ? "inf" : "-inf");
-                } else if (fabs(val - (int64_t)val) < 1e-10) {
-                    sprintf(result, "%lld", (int64_t)val);
-                } else {
-                    sprintf(result, "%g", val);
-                }
-            }
-            return result ? result : str_copy("");
-        }
-            
-        case NODE_BOOL:
-            return str_copy(node->data.bool_val ? "true" : "false");
-            
-        case NODE_NULL:
-            return str_copy("null");
-            
-        case NODE_UNDEFINED:
-            return str_copy("undefined");
-            
-        case NODE_IDENT: {
-            int idx = findVar(node->data.name);
-            if (idx >= 0) {
-                if (vars[idx].is_string && vars[idx].value.str_val) {
-                    return str_copy(vars[idx].value.str_val);
-                } else if (vars[idx].is_float) {
-                    char* result = malloc(32);
-                    if (result) {
-                        double val = vars[idx].value.float_val;
-                        if (isnan(val)) {
-                            strcpy(result, "nan");
-                        } else if (isinf(val)) {
-                            strcpy(result, val > 0 ? "inf" : "-inf");
-                        } else if (fabs(val - (int64_t)val) < 1e-10) {
-                            sprintf(result, "%lld", (int64_t)val);
-                        } else {
-                            sprintf(result, "%g", val);
-                        }
-                    }
-                    return result ? result : str_copy("");
-                } else {
-                    char* result = malloc(32);
-                    if (result) sprintf(result, "%lld", vars[idx].value.int_val);
-                    return result ? result : str_copy("");
-                }
-            } else {
-                return str_copy("undefined");
-            }
-        }
-            
-        case NODE_BINARY: {
-            if (node->op_type == TK_CONCAT) {
-                char* left_str = evalString(node->left);
-                char* right_str = evalString(node->right);
-                char* result = malloc(strlen(left_str) + strlen(right_str) + 1);
-                if (result) {
-                    strcpy(result, left_str);
-                    strcat(result, right_str);
-                }
-                free(left_str);
-                free(right_str);
-                return result ? result : str_copy("");
-            } else {
-                double val = evalFloat(node);
+        return result ? result : str_copy("");
+    }
+        
+    case NODE_BOOL:
+        return str_copy(node->data.bool_val ? "true" : "false");
+        
+    case NODE_NULL:
+        return str_copy("null");
+        
+    case NODE_UNDEFINED:
+        return str_copy("undefined");
+        
+    case NODE_IDENT: {
+        int idx = findVar(node->data.name);
+        if (idx >= 0) {
+            if (vars[idx].is_string && vars[idx].value.str_val) {
+                return str_copy(vars[idx].value.str_val);
+            } else if (vars[idx].is_float) {
                 char* result = malloc(32);
                 if (result) {
-                    if (isnan(val)) {
-                        strcpy(result, "nan");
-                    } else if (isinf(val)) {
-                        strcpy(result, val > 0 ? "inf" : "-inf");
-                    } else if (fabs(val - (int64_t)val) < 1e-10) {
-                        sprintf(result, "%lld", (int64_t)val);
-                    } else {
-                        sprintf(result, "%g", val);
-                    }
+                    double val = vars[idx].value.float_val;
+                    if (fabs(val - (int64_t)val) < 1e-10) sprintf(result, "%lld", (int64_t)val);
+                    else sprintf(result, "%g", val);
                 }
                 return result ? result : str_copy("");
+            } else {
+                char* result = malloc(32);
+                if (result) sprintf(result, "%lld", vars[idx].value.int_val);
+                return result ? result : str_copy("");
             }
+        } else {
+            return str_copy("undefined");
         }
-            
-        // DANS evalString (ATTENTION : C'est la version qui retourne du TEXTE)
+    }
+        
+    case NODE_BINARY: {
+        if (node->op_type == TK_CONCAT) {
+            char* left_str = evalString(node->left);
+            char* right_str = evalString(node->right);
+            char* result = malloc(strlen(left_str) + strlen(right_str) + 1);
+            if (result) {
+                strcpy(result, left_str);
+                strcat(result, right_str);
+            }
+            free(left_str);
+            free(right_str);
+            return result ? result : str_copy("");
+        } else {
+            double val = evalFloat(node);
+            char* result = malloc(32);
+            if (result) sprintf(result, "%g", val);
+            return result ? result : str_copy("");
+        }
+    }
+        
+    // --- APPEL DE FONCTION & METHODE ---
     case NODE_FUNC_CALL: {
         char* func_name = node->data.name;
         char* prev_this = current_this; 
         
-        // --- [OOP] LOGIQUE APPEL METHODE (obj.method) ---
         char* dot = strchr(func_name, '.');
         char real_func_name[256];
         bool is_method = false;
@@ -1177,7 +1139,6 @@ case NODE_WELD: {
             int old_scope = scope_level;
             scope_level++;
             
-            // Passage des arguments (Simplifié pour evalString)
             if (node->left && func->param_names) {
                 ASTNode* arg = node->left;
                 int param_idx = 0;
@@ -1190,7 +1151,6 @@ case NODE_WELD: {
                             var->scope_level = scope_level;
                             var->is_initialized = true;
                             
-                            // On évalue l'argument
                             if (arg->type == NODE_STRING) {
                                 var->is_string = true;
                                 var->value.str_val = evalString(arg);
@@ -1213,7 +1173,6 @@ case NODE_WELD: {
             current_function = prev_func;
             if (is_method) current_this = prev_this;
             
-            // RETOUR (Version String)
             if (func->return_string) {
                 return str_copy(func->return_string);
             } else {
@@ -1225,7 +1184,14 @@ case NODE_WELD: {
         
         if (is_method) current_this = prev_this;
         return str_copy("");
-    }
+    } // Fin NODE_FUNC_CALL
+
+    default:
+        return str_copy("");
+    } // Fin SWITCH
+    
+    return str_copy("");
+} // Fin FONCTION evalString
     
 static bool evalBool(ASTNode* node) {
     if (!node) return false;
