@@ -663,7 +663,15 @@ static double evalFloat(ASTNode* node) {
     if (!node) return 0.0;
     
     switch (node->type) {
-        // cmd sys
+
+        // DANS evalFloat(ASTNode* node)
+
+    case NODE_AWAIT: {
+        if (node->left) {
+            return evalFloat(node->left);
+        }
+        return 0.0;
+    }
         case NODE_SYS_EXEC: {
             char* cmd = evalString(node->left);
             // sys_exec_int est une nouvelle fonction dans sys.c qui retourne le int
@@ -880,6 +888,7 @@ case NODE_WELD: {
         prompt = evalString(node->left);
     }
     
+    
     // On utilise la fonction helper existante
     char* input = weldInput(prompt);
     
@@ -888,6 +897,40 @@ case NODE_WELD: {
     // On retourne la chaîne saisie
     return input ? input : str_copy("");
 }
+        // DANS evalString(ASTNode* node) ou un nouvel evalGeneric
+
+    // --- LAMBDA (Fonctions anonymes) ---
+    case NODE_LAMBDA: {
+        // Stratégie : On transforme la lambda en une fonction nommée "__lambda_123"
+        // et on retourne son nom. L'appelant pourra faire call("__lambda_123")
+        
+        char* anon_name = generateLambdaName();
+        
+        // Calcul du nombre de paramètres
+        int param_count = 0;
+        ASTNode* param = node->left; // Paramètres de la lambda
+        while (param) {
+            param_count++;
+            param = param->right;
+        }
+        
+        // Enregistrement comme une fonction normale
+        registerFunction(anon_name, node->left, node->right, param_count);
+        
+        printf("%s[LAMBDA]%s Created anonymous function: %s\n", COLOR_CYAN, COLOR_RESET, anon_name);
+        return anon_name; // On retourne le nom pour qu'il soit stocké dans une variable
+    }
+
+    // --- AWAIT ---
+    case NODE_AWAIT: {
+        // Dans une implémentation synchrone simple, await exécute juste l'expression.
+        // ex: var x = await fetch(); -> var x = fetch();
+        if (node->left) {
+            // Si c'est un appel de fonction qui retourne une string
+            return evalString(node->left);
+        }
+        return str_copy("");
+    }
         case NODE_HTTP_GET: {
             char* url = evalString(node->left);
             char* res = http_get(url);
@@ -1276,7 +1319,31 @@ static char* weldInput(const char* prompt) {
     }
     return input;
 }
+// Helper pour enregistrer une constante (utilisé par ENUM)
+static void registerGlobalConstant(const char* name, int value) {
+    if (var_count < 1000) {
+        Variable* var = &vars[var_count];
+        strncpy(var->name, name, 99);
+        var->type = TK_CONST;
+        var->size_bytes = 8;
+        var->scope_level = 0; // Toujours global
+        var->is_constant = true;
+        var->is_initialized = true;
+        var->is_float = false;
+        var->is_string = false;
+        var->value.int_val = value;
+        var_count++;
+        printf("%s[ENUM]%s Registered %s = %d\n", COLOR_MAGENTA, COLOR_RESET, name, value);
+    }
+}
 
+// Helper pour générer un nom unique pour les lambdas
+static char* generateLambdaName() {
+    static int lambda_id = 0;
+    char* name = malloc(32);
+    sprintf(name, "__lambda_%d", lambda_id++);
+    return name;
+}
 // ======================================================
 // [SECTION] MAIN EXECUTION FUNCTION
 // ======================================================
@@ -1566,21 +1633,6 @@ case NODE_DIR_LIST:
             break;
         }
             
-        case NODE_WHILE: {
-            while (evalBool(node->left) && !(current_function && current_function->has_returned)) {
-                execute(node->right);
-            }
-            break;
-        }
-            
-        case NODE_FOR: {
-            if (node->data.loop.init) execute(node->data.loop.init);
-            while (evalBool(node->data.loop.condition) && !(current_function && current_function->has_returned)) {
-                execute(node->data.loop.body);
-                if (node->data.loop.update) execute(node->data.loop.update);
-            }
-            break;
-        }
             
         case NODE_RETURN: {
     if (current_function) {
@@ -1720,7 +1772,121 @@ case NODE_DIR_LIST:
     }
     break;
 }
+   
+
+    // --- CONTROL FLOW (IF / ELIF / ELSE) ---
+    case NODE_IF: {
+        bool cond = evalBool(node->left);
+        if (cond) {
+            execute(node->right); // Bloc IF
+        } else if (node->third) {
+            // Le parser gère le ELIF comme un NODE_IF imbriqué dans le 'third' (else)
+            // Donc execute(node->third) gère récursivement les chaines if/else if/else
+            execute(node->third);
+        }
+        break;
+    }
+
+    // --- LOOPS (WHILE) ---
+    case NODE_WHILE: {
+        // Support basique des boucles
+        int safety_count = 0;
+        while (evalBool(node->left)) {
+            execute(node->right);
             
+            // Vérification de retour de fonction (pour sortir si 'return' est appelé dans la boucle)
+            if (current_function && current_function->has_returned) break;
+            
+            // Sécurité boucle infinie (optionnel, mis à 1M itérations)
+            safety_count++;
+            if (safety_count > 1000000) {
+                printf("%s[EXEC ERROR]%s Infinite loop detected in while\n", COLOR_RED, COLOR_RESET);
+                break;
+            }
+        }
+        break;
+    }
+
+    // --- LOOPS (FOR) ---
+    case NODE_FOR: {
+        // Initialisation (ex: var i = 0)
+        if (node->data.loop.init) execute(node->data.loop.init);
+        
+        // Condition & Boucle
+        while (evalBool(node->data.loop.condition)) {
+            // Corps de la boucle
+            execute(node->data.loop.body);
+            
+            if (current_function && current_function->has_returned) break;
+            
+            // Mise à jour (ex: i = i + 1)
+            if (node->data.loop.update) execute(node->data.loop.update);
+        }
+        break;
+    }
+
+    // --- OOP (CLASS) ---
+    case NODE_CLASS: {
+        // Enregistrement de la classe dans le registre global
+        if (node->data.class_def.name) {
+            char* parent = node->data.class_def.parent ? node->data.class_def.parent->data.name : NULL;
+            registerClass(node->data.class_def.name, parent, node->data.class_def.members);
+            
+            // On peut aussi exécuter les membres statiques ici si besoin
+        }
+        break;
+    }
+
+    // --- OOP (ENUM) ---
+    case NODE_ENUM: {
+        // Transforme: enum Color { RED, BLUE } 
+        // En constantes globales: Color_RED = 0, Color_BLUE = 1
+        if (node->data.name && node->left) {
+            ASTNode* variant = node->left;
+            int val_counter = 0;
+            
+            while (variant) {
+                char full_name[256];
+                char* variant_name = NULL;
+                
+                // Le variant peut être un IDENT ou un ASSIGN (si valeur manuelle)
+                if (variant->type == NODE_IDENT) {
+                    variant_name = variant->data.name;
+                } else if (variant->type == NODE_ASSIGN && variant->data.name) {
+                    variant_name = variant->data.name;
+                    // Si une valeur est assignée (ex: RED = 5)
+                    if (variant->left) val_counter = (int)evalFloat(variant->left);
+                }
+                
+                if (variant_name) {
+                    snprintf(full_name, 256, "%s_%s", node->data.name, variant_name);
+                    registerGlobalConstant(full_name, val_counter);
+                    val_counter++;
+                }
+                
+                variant = variant->right;
+            }
+        }
+        break;
+    }
+
+    // --- ASYNC (Déclaration) ---
+    case NODE_ASYNC: {
+        // Dans notre interpréteur synchrone, on traite 'async func' comme une func normale
+        // Mais on pourrait marquer un flag "is_async" dans la structure Function
+        if (node->left && node->left->type == NODE_FUNC) {
+            // On délègue l'enregistrement au NODE_FUNC standard
+            execute(node->left); 
+            
+            // Optionnel : Retrouver la fonction et marquer comme async
+            if (node->left->data.name) {
+                Function* f = findFunction(node->left->data.name);
+                // if (f) f->is_async = true; // Si tu ajoutes ce champ dans struct Function
+                printf("%s[ASYNC]%s Registered async function: %s\n", COLOR_CYAN, COLOR_RESET, node->left->data.name);
+            }
+        }
+        break;
+    }         
        
         case NODE_FUNC: {
     // Enregistrer la fonction SEULEMENT si on est dans le scope global
@@ -1745,11 +1911,6 @@ case NODE_DIR_LIST:
             evalFloat(node);
             break;
             
-        case NODE_CLASS:
-            registerClass(node->data.class_def.name, 
-                         node->data.class_def.parent ? node->data.class_def.parent->data.name : NULL,
-                         node->data.class_def.members);
-            break;
         
             
         case NODE_TYPEDEF:
