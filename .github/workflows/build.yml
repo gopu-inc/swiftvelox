@@ -1,8 +1,11 @@
 name: Notify Discord on Release
 
 on:
+  push:
+    branches:
+      - main
   release:
-    types: [released]
+    types: [published]
 
 jobs:
   notify:
