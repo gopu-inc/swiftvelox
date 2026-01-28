@@ -660,6 +660,9 @@ static double evalFloat(ASTNode* node) {
     switch (node->type) {
 
     case NODE_MATH_FUNC: {
+        if (node->op_type == TK_MATH_PI || node->op_type == TK_MATH_E) {
+            return std_math_const(node->op_type);
+        }
         double v1 = node->left ? evalFloat(node->left) : 0;
         double v2 = node->right ? evalFloat(node->right) : 0;
         return std_math_calc(node->op_type, v1, v2);
@@ -919,7 +922,16 @@ static char* evalString(ASTNode* node) {
     
     // --- INSTANCIATION ---
     // DANS evalString
-
+    case NODE_CRYPTO_FUNC: {
+        char* data = evalString(node->left);
+        char* res = NULL;
+        
+        if (node->op_type == TK_CRYPTO_SHA256) res = std_crypto_sha256(data);
+        else if (node->op_type == TK_CRYPTO_B64ENC) res = std_crypto_b64enc(data);
+        
+        free(data);
+        return res ? res : str_copy("");
+    }
     case NODE_ENV_FUNC: {
         if (node->op_type == TK_ENV_GET) {
             char* key = evalString(node->left);
