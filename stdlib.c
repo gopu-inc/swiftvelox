@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include "common.h"
 #include "stdlib.h"
+#include <limits.h> // Pour PATH_MAX et realpath
 
 // --- MATH ---
 double std_math_calc(int op_type, double val1, double val2) {
@@ -106,4 +107,92 @@ char* std_b64_encode(const char* data) {
     // Pour l'instant, on peut renvoyer une chaîne fictive ou utiliser une lib externe
     // Si tu as -lcurl, curl a des fonctions internes, mais mieux vaut une implém pure C
     return strdup(data); // TODO: Vraie implémentation Base64
+}
+
+// --- ENV ---
+char* std_env_get(const char* key) {
+    if(!key) return NULL;
+    char* val = getenv(key);
+    return val ? strdup(val) : NULL;
+}
+
+void std_env_set(const char* key, const char* value) {
+    if(key && value) setenv(key, value, 1);
+}
+
+char* std_env_os(void) {
+    #ifdef _WIN32
+        return strdup("windows");
+    #elif __APPLE__
+        return strdup("macos");
+    #elif __linux__
+        return strdup("linux");
+    #else
+        return strdup("unknown");
+    #endif
+}
+
+// --- PATH ---
+char* std_path_basename(const char* path) {
+    if (!path) return strdup("");
+    char* p = strrchr(path, '/');
+    return p ? strdup(p + 1) : strdup(path);
+}
+
+char* std_path_dirname(const char* path) {
+    if (!path) return strdup(".");
+    char* p = strrchr(path, '/');
+    if (!p) return strdup(".");
+    if (p == path) return strdup("/"); // Racine
+    
+    int len = p - path;
+    char* res = malloc(len + 1);
+    strncpy(res, path, len);
+    res[len] = '\0';
+    return res;
+}
+
+char* std_path_join(const char* p1, const char* p2) {
+    if (!p1) return p2 ? strdup(p2) : strdup("");
+    if (!p2) return strdup(p1);
+    
+    int l1 = strlen(p1);
+    int l2 = strlen(p2);
+    // Gérer le slash
+    int need_slash = (l1 > 0 && p1[l1-1] != '/') ? 1 : 0;
+    
+    char* res = malloc(l1 + need_slash + l2 + 1);
+    strcpy(res, p1);
+    if (need_slash) strcat(res, "/");
+    strcat(res, p2);
+    return res;
+}
+
+char* std_path_abs(const char* path) {
+    char buf[PATH_MAX];
+    if (realpath(path, buf)) {
+        return strdup(buf);
+    }
+    return strdup(path); // Fallback
+}
+
+// --- STRING EXTENSIONS ---
+char* std_str_trim(const char* s) {
+    if (!s) return NULL;
+    while(isspace(*s)) s++; // Trim début
+    if(*s == 0) return strdup("");
+    
+    char* back = (char*)s + strlen(s) - 1;
+    while(back > s && isspace(*back)) back--; // Trim fin
+    
+    int len = back - s + 1;
+    char* res = malloc(len + 1);
+    strncpy(res, s, len);
+    res[len] = '\0';
+    return res;
+}
+
+int std_str_contains(const char* haystack, const char* needle) {
+    if (!haystack || !needle) return 0;
+    return strstr(haystack, needle) != NULL;
 }
