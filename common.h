@@ -74,7 +74,15 @@ typedef enum {
     TK_CONCAT_ASSIGN, TK_STD_LEN, TK_STD_SPLIT, TK_STD_TO_INT, TK_STD_TO_STR,
     
     // Logical operators
-    TK_AND, TK_OR, TK_NOT,
+    TK_AND, TK_OR, TK_NOT, TK_ENV_GET, TK_ENV_SET, TK_ENV_OS,
+    
+    // PATH
+    TK_PATH_BASENAME, TK_PATH_DIRNAME, TK_PATH_JOIN, TK_PATH_ABS,
+    
+    // STR EXTENSIONS
+    TK_STR_TRIM, TK_STR_CONTAINS, TK_STR_STARTS, TK_STR_ENDS,
+
+
     
     // Bitwise operators
     TK_BIT_AND, TK_BIT_OR, TK_BIT_XOR, TK_BIT_NOT,
@@ -295,6 +303,8 @@ typedef enum {
     NODE_STR_FUNC,  // Un seul type générique pour les strings
     NODE_TIME_NOW,
     NODE_TIME_SLEEP,
+    NODE_ENV_FUNC,
+    NODE_PATH_FUNC,
     NODE_ENC_FUNC,
     NODE_HTTP_GET,
     NODE_HTTP_POST,
