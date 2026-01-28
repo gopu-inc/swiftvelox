@@ -761,171 +761,110 @@ static ASTNode* jsonGetStatement() {
     consume(TK_RPAREN, "Expected ')'");
     return node;
 }
-// Primary expressions
+
 static ASTNode* primary() {
     // ========================================================================
-    // [SECTION] Appels de Modules Natifs (io.open, http.get, etc.)
+    // [SECTION] Appels de Modules Natifs
     // ========================================================================
     if (check(TK_IDENT)) {
-        // Variables déclarées ICI, valables pour tout le bloc
         const char* module_name = current.value.str_val;
         Token start_token = current; 
-        // --- MODULE 'env' ---
-        else if (strcmp(module_name, "env") == 0) {
-            advance();
-            if (match(TK_PERIOD) && match(TK_IDENT)) {
-                const char* cmd = previous.value.str_val;
-                ASTNode* node = newNode(NODE_ENV_FUNC);
-                
-                if (strcmp(cmd, "get") == 0) node->op_type = TK_ENV_GET;
-                else if (strcmp(cmd, "set") == 0) node->op_type = TK_ENV_SET;
-                else if (strcmp(cmd, "os") == 0) node->op_type = TK_ENV_OS;
-                
-                consume(TK_LPAREN, "(");
-                if (node->op_type != TK_ENV_OS) {
-                    node->left = expression(); // key
-                    if (node->op_type == TK_ENV_SET) {
-                        consume(TK_COMMA, ",");
-                        node->right = expression(); // value
-                    }
-                }
-                consume(TK_RPAREN, ")");
-                return node;
-            }
-            current = start_token;
-        }
-        
-        // --- MODULE 'path' ---
-        else if (strcmp(module_name, "path") == 0) {
-            advance();
-            if (match(TK_PERIOD) && match(TK_IDENT)) {
-                const char* cmd = previous.value.str_val;
-                ASTNode* node = newNode(NODE_PATH_FUNC);
-                
-                if (strcmp(cmd, "basename") == 0) node->op_type = TK_PATH_BASENAME;
-                else if (strcmp(cmd, "dirname") == 0) node->op_type = TK_PATH_DIRNAME;
-                else if (strcmp(cmd, "join") == 0) node->op_type = TK_PATH_JOIN;
-                else if (strcmp(cmd, "abs") == 0) node->op_type = TK_PATH_ABS;
-                
-                consume(TK_LPAREN, "(");
-                node->left = expression();
-                if (node->op_type == TK_PATH_JOIN) {
-                    consume(TK_COMMA, ",");
-                    node->right = expression();
-                }
-                consume(TK_RPAREN, ")");
-                return node;
-            }
-            current = start_token;
-        }
+
         // --- MODULE 'io' ---
         if (strcmp(module_name, "io") == 0) {
-            advance(); // Consomme "io"
-            if (match(TK_PERIOD)) {
-                if (match(TK_IDENT)) {
-                    const char* cmd = previous.value.str_val;
-                    if (strcmp(cmd, "open") == 0) return ioOpenStatement();
-                    if (strcmp(cmd, "close") == 0) return ioCloseStatement();
-                    if (strcmp(cmd, "read") == 0) return ioReadStatement();
-                    if (strcmp(cmd, "write") == 0) return ioWriteStatement();
-                    if (strcmp(cmd, "seek") == 0) return ioSeekStatement();
-                    if (strcmp(cmd, "tell") == 0) return ioTellStatement();
-                    if (strcmp(cmd, "flush") == 0) return ioFlushStatement();
-                    if (strcmp(cmd, "exists") == 0) return ioExistsStatement();
-                    if (strcmp(cmd, "isfile") == 0) return ioIsfileStatement();
-                    if (strcmp(cmd, "isdir") == 0) return ioIsdirStatement();
-                    if (strcmp(cmd, "mkdir") == 0) return ioMkdirStatement();
-                    if (strcmp(cmd, "rmdir") == 0) return ioRmdirStatement();
-                    if (strcmp(cmd, "listdir") == 0) return ioListdirStatement();
-                    if (strcmp(cmd, "remove") == 0) return ioRemoveStatement();
-                    if (strcmp(cmd, "rename") == 0) return ioRenameStatement();
-                    if (strcmp(cmd, "copy") == 0) return ioCopyStatement();
-                }
+            advance(); 
+            if (match(TK_PERIOD) && match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                if (strcmp(cmd, "open") == 0) return ioOpenStatement();
+                if (strcmp(cmd, "close") == 0) return ioCloseStatement();
+                if (strcmp(cmd, "read") == 0) return ioReadStatement();
+                if (strcmp(cmd, "write") == 0) return ioWriteStatement();
+                if (strcmp(cmd, "exists") == 0) return ioExistsStatement();
+                if (strcmp(cmd, "seek") == 0) return ioSeekStatement();
+                if (strcmp(cmd, "tell") == 0) return ioTellStatement();
+                if (strcmp(cmd, "flush") == 0) return ioFlushStatement();
+                if (strcmp(cmd, "isfile") == 0) return ioIsfileStatement();
+                if (strcmp(cmd, "isdir") == 0) return ioIsdirStatement();
+                if (strcmp(cmd, "mkdir") == 0) return ioMkdirStatement();
+                if (strcmp(cmd, "rmdir") == 0) return ioRmdirStatement();
+                if (strcmp(cmd, "listdir") == 0) return ioListdirStatement();
+                if (strcmp(cmd, "remove") == 0) return ioRemoveStatement();
+                if (strcmp(cmd, "rename") == 0) return ioRenameStatement();
+                if (strcmp(cmd, "copy") == 0) return ioCopyStatement();
             }
-            // Si ce n'est pas un appel natif reconnu (ex: var my_io = {..}), on annule
             current = start_token;
         }
         // --- MODULE 'net' ---
         else if (strcmp(module_name, "net") == 0) {
             advance();
-            if (match(TK_PERIOD)) {
-                if (match(TK_IDENT)) {
-                    const char* cmd = previous.value.str_val;
-                    if (strcmp(cmd, "socket") == 0) return netSocketStatement();
-                    if (strcmp(cmd, "connect") == 0) return netConnectStatement();
-                    if (strcmp(cmd, "listen") == 0) return netListenStatement();
-                    if (strcmp(cmd, "accept") == 0) return netAcceptStatement();
-                    if (strcmp(cmd, "send") == 0) return netSendStatement();
-                    if (strcmp(cmd, "recv") == 0) return netRecvStatement();
-                    if (strcmp(cmd, "close") == 0) return netCloseStatement();
-                }
+            if (match(TK_PERIOD) && match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                if (strcmp(cmd, "socket") == 0) return netSocketStatement();
+                if (strcmp(cmd, "connect") == 0) return netConnectStatement();
+                if (strcmp(cmd, "listen") == 0) return netListenStatement();
+                if (strcmp(cmd, "accept") == 0) return netAcceptStatement();
+                if (strcmp(cmd, "send") == 0) return netSendStatement();
+                if (strcmp(cmd, "recv") == 0) return netRecvStatement();
+                if (strcmp(cmd, "close") == 0) return netCloseStatement();
             }
             current = start_token;
         }
         // --- MODULE 'http' ---
         else if (strcmp(module_name, "http") == 0) {
             advance();
-            if (match(TK_PERIOD)) {
-                if (match(TK_IDENT)) {
-                    const char* cmd = previous.value.str_val;
-                    if (strcmp(cmd, "get") == 0) return httpGetStatement();
-                    if (strcmp(cmd, "post") == 0) return httpPostStatement();
-                    if (strcmp(cmd, "download") == 0) return httpDownloadStatement();
-                }
+            if (match(TK_PERIOD) && match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                if (strcmp(cmd, "get") == 0) return httpGetStatement();
+                if (strcmp(cmd, "post") == 0) return httpPostStatement();
+                if (strcmp(cmd, "download") == 0) return httpDownloadStatement();
             }
             current = start_token;
         }
         // --- MODULE 'sys' ---
         else if (strcmp(module_name, "sys") == 0) {
             advance();
-            if (match(TK_PERIOD)) {
-                if (match(TK_IDENT)) {
-                    const char* cmd = previous.value.str_val;
-                    if (strcmp(cmd, "exec") == 0) return sysExecStatement();
-                    if (strcmp(cmd, "argv") == 0) return sysArgvStatement();
-                    if (strcmp(cmd, "exit") == 0) return sysExitStatement();
-                }
+            if (match(TK_PERIOD) && match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                if (strcmp(cmd, "exec") == 0) return sysExecStatement();
+                if (strcmp(cmd, "argv") == 0) return sysArgvStatement();
+                if (strcmp(cmd, "exit") == 0) return sysExitStatement();
             }
             current = start_token;
         }
         // --- MODULE 'json' ---
         else if (strcmp(module_name, "json") == 0) {
             advance();
-            if (match(TK_PERIOD)) {
-                if (match(TK_IDENT)) {
-                    if (strcmp(previous.value.str_val, "get") == 0) return jsonGetStatement();
-                }
+            if (match(TK_PERIOD) && match(TK_IDENT)) {
+                if (strcmp(previous.value.str_val, "get") == 0) return jsonGetStatement();
             }
             current = start_token;
         }
         // --- MODULE 'std' ---
         else if (strcmp(module_name, "std") == 0) {
             advance();
-            if (match(TK_PERIOD)) {
-                if (match(TK_IDENT)) {
-                    const char* cmd = previous.value.str_val;
-                    if (strcmp(cmd, "len") == 0) {
-                        ASTNode* node = newNode(NODE_STD_LEN);
-                        consume(TK_LPAREN, "("); node->left = expression(); consume(TK_RPAREN, ")");
-                        return node;
-                    }
-                    if (strcmp(cmd, "split") == 0) {
-                        ASTNode* node = newNode(NODE_STD_SPLIT);
-                        consume(TK_LPAREN, "("); 
-                        node->left = expression(); consume(TK_COMMA, ","); node->right = expression(); 
-                        consume(TK_RPAREN, ")");
-                        return node;
-                    }
-                    if (strcmp(cmd, "to_int") == 0) {
-                        ASTNode* node = newNode(NODE_STD_TO_INT);
-                        consume(TK_LPAREN, "("); node->left = expression(); consume(TK_RPAREN, ")");
-                        return node;
-                    }
-                    if (strcmp(cmd, "to_str") == 0) {
-                        ASTNode* node = newNode(NODE_STD_TO_STR);
-                        consume(TK_LPAREN, "("); node->left = expression(); consume(TK_RPAREN, ")");
-                        return node;
-                    }
+            if (match(TK_PERIOD) && match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                if (strcmp(cmd, "len") == 0) {
+                    ASTNode* node = newNode(NODE_STD_LEN);
+                    consume(TK_LPAREN, "("); node->left = expression(); consume(TK_RPAREN, ")");
+                    return node;
+                }
+                if (strcmp(cmd, "split") == 0) {
+                    ASTNode* node = newNode(NODE_STD_SPLIT);
+                    consume(TK_LPAREN, "("); 
+                    node->left = expression(); consume(TK_COMMA, ","); node->right = expression(); 
+                    consume(TK_RPAREN, ")");
+                    return node;
+                }
+                if (strcmp(cmd, "to_int") == 0) {
+                    ASTNode* node = newNode(NODE_STD_TO_INT);
+                    consume(TK_LPAREN, "("); node->left = expression(); consume(TK_RPAREN, ")");
+                    return node;
+                }
+                if (strcmp(cmd, "to_str") == 0) {
+                    ASTNode* node = newNode(NODE_STD_TO_STR);
+                    consume(TK_LPAREN, "("); node->left = expression(); consume(TK_RPAREN, ")");
+                    return node;
                 }
             }
             current = start_token;
@@ -939,15 +878,18 @@ static ASTNode* primary() {
                 
                 if (strcmp(cmd, "sin") == 0) node->op_type = TK_MATH_SIN;
                 else if (strcmp(cmd, "cos") == 0) node->op_type = TK_MATH_COS;
+                else if (strcmp(cmd, "tan") == 0) node->op_type = TK_MATH_TAN;
                 else if (strcmp(cmd, "sqrt") == 0) node->op_type = TK_MATH_SQRT;
+                else if (strcmp(cmd, "abs") == 0) node->op_type = TK_MATH_ABS;
                 else if (strcmp(cmd, "random") == 0) node->op_type = TK_MATH_RANDOM;
                 else if (strcmp(cmd, "floor") == 0) node->op_type = TK_MATH_FLOOR;
+                else if (strcmp(cmd, "ceil") == 0) node->op_type = TK_MATH_CEIL;
                 else if (strcmp(cmd, "round") == 0) node->op_type = TK_MATH_ROUND;
                 else if (strcmp(cmd, "pow") == 0) node->op_type = TK_MATH_POW;
                 else {
                     free(node);
                     current = start_token;
-                    goto end_native; 
+                    goto end_native_check; 
                 }
                 
                 consume(TK_LPAREN, "(");
@@ -971,27 +913,29 @@ static ASTNode* primary() {
                 ASTNode* node = newNode(NODE_STR_FUNC);
                 
                 if (strcmp(cmd, "upper") == 0) node->op_type = TK_STR_UPPER;
-                else if (strcmp(cmd, "trim") == 0) node->op_type = TK_STR_TRIM;
-                else if (strcmp(cmd, "contains") == 0) node->op_type = TK_STR_CONTAINS;
                 else if (strcmp(cmd, "lower") == 0) node->op_type = TK_STR_LOWER;
                 else if (strcmp(cmd, "sub") == 0) node->op_type = TK_STR_SUB;
                 else if (strcmp(cmd, "replace") == 0) node->op_type = TK_STR_REPLACE;
+                else if (strcmp(cmd, "trim") == 0) node->op_type = TK_STR_TRIM;
+                else if (strcmp(cmd, "contains") == 0) node->op_type = TK_STR_CONTAINS;
+                else if (strcmp(cmd, "starts") == 0) node->op_type = TK_STR_STARTS;
+                else if (strcmp(cmd, "ends") == 0) node->op_type = TK_STR_ENDS;
                 else {
                     free(node);
                     current = start_token;
-                    goto end_native;
+                    goto end_native_check;
                 }
                 
                 consume(TK_LPAREN, "(");
                 node->left = expression();
                 
-                if (node->op_type == TK_STR_SUB) {
+                if (node->op_type == TK_STR_SUB || node->op_type == TK_STR_REPLACE || 
+                    node->op_type == TK_STR_CONTAINS || node->op_type == TK_STR_STARTS || 
+                    node->op_type == TK_STR_ENDS) {
                     consume(TK_COMMA, ","); node->right = expression();
-                    consume(TK_COMMA, ","); node->third = expression();
-                } 
-                else if (node->op_type == TK_STR_REPLACE) {
-                    consume(TK_COMMA, ","); node->right = expression();
-                    consume(TK_COMMA, ","); node->third = expression();
+                    if (node->op_type == TK_STR_SUB || node->op_type == TK_STR_REPLACE) {
+                        consume(TK_COMMA, ","); node->third = expression();
+                    }
                 }
                 consume(TK_RPAREN, ")");
                 return node;
@@ -1015,9 +959,56 @@ static ASTNode* primary() {
             }
             current = start_token;
         }
+        // --- MODULE 'env' (NOUVEAU) ---
+        else if (strcmp(module_name, "env") == 0) {
+            advance();
+            if (match(TK_PERIOD) && match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                ASTNode* node = newNode(NODE_ENV_FUNC);
+                
+                if (strcmp(cmd, "get") == 0) node->op_type = TK_ENV_GET;
+                else if (strcmp(cmd, "set") == 0) node->op_type = TK_ENV_SET;
+                else if (strcmp(cmd, "os") == 0) node->op_type = TK_ENV_OS;
+                else { free(node); current = start_token; goto end_native_check; }
+                
+                consume(TK_LPAREN, "(");
+                if (node->op_type != TK_ENV_OS) {
+                    node->left = expression();
+                    if (node->op_type == TK_ENV_SET) {
+                        consume(TK_COMMA, ","); node->right = expression();
+                    }
+                }
+                consume(TK_RPAREN, ")");
+                return node;
+            }
+            current = start_token;
+        }
+        // --- MODULE 'path' (NOUVEAU) ---
+        else if (strcmp(module_name, "path") == 0) {
+            advance();
+            if (match(TK_PERIOD) && match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                ASTNode* node = newNode(NODE_PATH_FUNC);
+                
+                if (strcmp(cmd, "basename") == 0) node->op_type = TK_PATH_BASENAME;
+                else if (strcmp(cmd, "dirname") == 0) node->op_type = TK_PATH_DIRNAME;
+                else if (strcmp(cmd, "join") == 0) node->op_type = TK_PATH_JOIN;
+                else if (strcmp(cmd, "abs") == 0) node->op_type = TK_PATH_ABS;
+                else { free(node); current = start_token; goto end_native_check; }
+                
+                consume(TK_LPAREN, "(");
+                node->left = expression();
+                if (node->op_type == TK_PATH_JOIN) {
+                    consume(TK_COMMA, ","); node->right = expression();
+                }
+                consume(TK_RPAREN, ")");
+                return node;
+            }
+            current = start_token;
+        }
     }
     
-    end_native:;
+    end_native_check:;
 
     // ========================================================================
     // Reste du parsing standard
@@ -1046,10 +1037,7 @@ static ASTNode* primary() {
 
     if (match(TK_NEW)) {
         ASTNode* node = newNode(NODE_NEW);
-        if (!match(TK_IDENT)) {
-            // error("Expected class name after 'new'");
-            return NULL;
-        }
+        if (!match(TK_IDENT)) return NULL;
         node->data.name = str_copy(previous.value.str_val);
         if (match(TK_LPAREN)) {
             if (!check(TK_RPAREN)) node->left = expression();
@@ -1076,7 +1064,6 @@ static ASTNode* primary() {
     errorAtCurrent("Expected expression.");
     return NULL;
 }
-
 // ======================================================
 // [SECTION] STATEMENT PARSING - COMPLETE
 // ======================================================
