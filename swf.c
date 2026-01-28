@@ -921,30 +921,29 @@ static char* evalString(ASTNode* node) {
     switch (node->type) {
     
     // --- INSTANCIATION ---
-    // DANS evalString
+
+    
+    
+
+    // =========================================================
+    // AJOUTER CES BLOCS DANS evalString DE swf.c
+    // =========================================================
+
+    // --- CRYPTO ---
     case NODE_CRYPTO_FUNC: {
         char* data = evalString(node->left);
         char* res = NULL;
         
         if (node->op_type == TK_CRYPTO_SHA256) res = std_crypto_sha256(data);
+        else if (node->op_type == TK_CRYPTO_MD5) res = std_crypto_md5(data);
         else if (node->op_type == TK_CRYPTO_B64ENC) res = std_crypto_b64enc(data);
+        else if (node->op_type == TK_CRYPTO_B64DEC) res = std_crypto_b64dec(data);
         
-        free(data);
+        if (data) free(data);
         return res ? res : str_copy("");
     }
-    case NODE_ENV_FUNC: {
-        if (node->op_type == TK_ENV_GET) {
-            char* key = evalString(node->left);
-            char* val = std_env_get(key);
-            free(key);
-            return val ? val : str_copy(""); // Retourne chaîne vide si pas trouvé
-        }
-        if (node->op_type == TK_ENV_OS) {
-            return std_env_os();
-        }
-        return str_copy("");
-    }
 
+    // --- PATH ---
     case NODE_PATH_FUNC: {
         char* p1 = evalString(node->left);
         char* res = NULL;
@@ -961,6 +960,29 @@ static char* evalString(ASTNode* node) {
         free(p1);
         return res ? res : str_copy("");
     }
+
+    // --- ENV ---
+    case NODE_ENV_FUNC: {
+        if (node->op_type == TK_ENV_GET) {
+            char* key = evalString(node->left);
+            char* val = std_env_get(key);
+            free(key);
+            return val ? val : str_copy("");
+        }
+        if (node->op_type == TK_ENV_OS) {
+            return std_env_os();
+        }
+        return str_copy("");
+    }
+
+    // --- MATH (Pour l'affichage ex: print(math.PI)) ---
+    case NODE_MATH_FUNC: {
+        // On délègue le calcul à evalFloat, puis on convertit en string
+        double val = evalFloat(node);
+        char buf[64];
+        sprintf(buf, "%g", val);
+        return str_copy(buf);
+    } 
     case NODE_NEW: {
         static int instance_id = 0;
         char instance_name[64];
