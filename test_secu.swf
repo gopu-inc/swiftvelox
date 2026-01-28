@@ -1,0 +1,6 @@
+var data =5 * 10;
+
+lock(data) {
+    // data = 20; // Ceci échouera si tu tentes de modifier une var lockée depuis un autre thread (simulé)
+    print("Data is safe here data =", data);
+}
