@@ -95,7 +95,10 @@ typedef enum {
     
     
     // Type operators
-    TK_IN, TK_IS, TK_ISNOT, TK_AS_OP,
+    TK_IN, TK_IS, TK_ISNOT, TK_AS_OP, TK_CRYPTO_SHA256, TK_CRYPTO_MD5, TK_CRYPTO_B64ENC, TK_CRYPTO_B64DEC,
+    // MATH CONSTANTS
+    TK_MATH_PI, TK_MATH_E,
+
     
     // Punctuation
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE,
@@ -347,7 +350,7 @@ typedef enum {
     NODE_LAMBDA,
     NODE_ARRAY_ACCESS,
     NODE_MEMBER_ACCESS,
-    
+    NODE_CRYPTO_FUNC,
     // Operations
     NODE_BINARY,
     NODE_UNARY,
