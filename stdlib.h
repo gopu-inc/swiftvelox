@@ -3,7 +3,14 @@
 
 #include "common.h"
 
-// Math
+// Crypto
+char* std_crypto_sha256(const char* data);
+char* std_crypto_md5(const char* data); // Version simplifiée
+char* std_crypto_b64enc(const char* data);
+char* std_crypto_b64dec(const char* data);
+
+// Math et CONSTANT
+double std_math_const(int type);
 double std_math_calc(int op_type, double val1, double val2);
 
 // String
