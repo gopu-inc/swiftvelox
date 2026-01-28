@@ -721,85 +721,6 @@ static ASTNode* jsonGetStatement() {
 }
 // Primary expressions
 static ASTNode* primary() {
-    // --- MODULE 'math' ---
-        else if (strcmp(module_name, "math") == 0) {
-            advance();
-            if (match(TK_PERIOD) && match(TK_IDENT)) {
-                const char* cmd = previous.value.str_val;
-                ASTNode* node = newNode(NODE_MATH_FUNC);
-                
-                // Mapping commande -> Opérateur
-                if (strcmp(cmd, "sin") == 0) node->op_type = TK_MATH_SIN;
-                else if (strcmp(cmd, "cos") == 0) node->op_type = TK_MATH_COS;
-                else if (strcmp(cmd, "sqrt") == 0) node->op_type = TK_MATH_SQRT;
-                else if (strcmp(cmd, "random") == 0) node->op_type = TK_MATH_RANDOM;
-                else if (strcmp(cmd, "floor") == 0) node->op_type = TK_MATH_FLOOR;
-                else if (strcmp(cmd, "round") == 0) node->op_type = TK_MATH_ROUND;
-                else if (strcmp(cmd, "pow") == 0) node->op_type = TK_MATH_POW;
-                
-                // Parsing des arguments
-                consume(TK_LPAREN, "(");
-                if (node->op_type != TK_MATH_RANDOM) { // random() n'a pas d'arg
-                    node->left = expression();
-                    if (node->op_type == TK_MATH_POW) {
-                        consume(TK_COMMA, ",");
-                        node->right = expression();
-                    }
-                }
-                consume(TK_RPAREN, ")");
-                return node;
-            }
-            current = start_token;
-        }
-        
-        // --- MODULE 'str' ---
-        else if (strcmp(module_name, "str") == 0) {
-            advance();
-            if (match(TK_PERIOD) && match(TK_IDENT)) {
-                const char* cmd = previous.value.str_val;
-                ASTNode* node = newNode(NODE_STR_FUNC);
-                
-                if (strcmp(cmd, "upper") == 0) node->op_type = TK_STR_UPPER;
-                else if (strcmp(cmd, "lower") == 0) node->op_type = TK_STR_LOWER;
-                else if (strcmp(cmd, "sub") == 0) node->op_type = TK_STR_SUB;
-                else if (strcmp(cmd, "replace") == 0) node->op_type = TK_STR_REPLACE;
-                
-                consume(TK_LPAREN, "(");
-                node->left = expression(); // Chaine cible
-                
-                if (node->op_type == TK_STR_SUB) {
-                    consume(TK_COMMA, ","); node->right = expression(); // start
-                    consume(TK_COMMA, ","); node->third = expression(); // len
-                } 
-                else if (node->op_type == TK_STR_REPLACE) {
-                    consume(TK_COMMA, ","); node->right = expression(); // search
-                    consume(TK_COMMA, ","); node->third = expression(); // replace
-                }
-                
-                consume(TK_RPAREN, ")");
-                return node;
-            }
-            current = start_token;
-        }
-
-        // --- MODULE 'time' ---
-        else if (strcmp(module_name, "time") == 0) {
-            advance();
-            if (match(TK_PERIOD) && match(TK_IDENT)) {
-                const char* cmd = previous.value.str_val;
-                if (strcmp(cmd, "now") == 0) {
-                    consume(TK_LPAREN, "("); consume(TK_RPAREN, ")");
-                    return newNode(NODE_TIME_NOW);
-                }
-                if (strcmp(cmd, "sleep") == 0) {
-                    ASTNode* node = newNode(NODE_TIME_SLEEP);
-                    consume(TK_LPAREN, "("); node->left = expression(); consume(TK_RPAREN, ")");
-                    // C'est une instruction, mais peut être utilisée en expression (retourne void/0)
-                    return node;
-                }
-            }
-            current = start_token;
-        }
     // Try lambda first
     ASTNode* lambda = lambdaExpression();
     if (lambda) return lambda;
@@ -995,6 +916,84 @@ static ASTNode* primary() {
                 if (match(TK_STRING)) {
                     key = str_copy(previous.value.str_val);
                 } else if (match(TK_IDENT)) {
+                    else if (strcmp(module_name, "math") == 0) {
+            advance();
+            if (match(TK_PERIOD) && match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                ASTNode* node = newNode(NODE_MATH_FUNC);
+                
+                // Mapping commande -> Opérateur
+                if (strcmp(cmd, "sin") == 0) node->op_type = TK_MATH_SIN;
+                else if (strcmp(cmd, "cos") == 0) node->op_type = TK_MATH_COS;
+                else if (strcmp(cmd, "sqrt") == 0) node->op_type = TK_MATH_SQRT;
+                else if (strcmp(cmd, "random") == 0) node->op_type = TK_MATH_RANDOM;
+                else if (strcmp(cmd, "floor") == 0) node->op_type = TK_MATH_FLOOR;
+                else if (strcmp(cmd, "round") == 0) node->op_type = TK_MATH_ROUND;
+                else if (strcmp(cmd, "pow") == 0) node->op_type = TK_MATH_POW;
+                
+                // Parsing des arguments
+                consume(TK_LPAREN, "(");
+                if (node->op_type != TK_MATH_RANDOM) { // random() n'a pas d'arg
+                    node->left = expression();
+                    if (node->op_type == TK_MATH_POW) {
+                        consume(TK_COMMA, ",");
+                        node->right = expression();
+                    }
+                }
+                consume(TK_RPAREN, ")");
+                return node;
+            }
+            current = start_token;
+        }
+        
+        // --- MODULE 'str' ---
+        else if (strcmp(module_name, "str") == 0) {
+            advance();
+            if (match(TK_PERIOD) && match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                ASTNode* node = newNode(NODE_STR_FUNC);
+                
+                if (strcmp(cmd, "upper") == 0) node->op_type = TK_STR_UPPER;
+                else if (strcmp(cmd, "lower") == 0) node->op_type = TK_STR_LOWER;
+                else if (strcmp(cmd, "sub") == 0) node->op_type = TK_STR_SUB;
+                else if (strcmp(cmd, "replace") == 0) node->op_type = TK_STR_REPLACE;
+                
+                consume(TK_LPAREN, "(");
+                node->left = expression(); // Chaine cible
+                
+                if (node->op_type == TK_STR_SUB) {
+                    consume(TK_COMMA, ","); node->right = expression(); // start
+                    consume(TK_COMMA, ","); node->third = expression(); // len
+                } 
+                else if (node->op_type == TK_STR_REPLACE) {
+                    consume(TK_COMMA, ","); node->right = expression(); // search
+                    consume(TK_COMMA, ","); node->third = expression(); // replace
+                }
+                
+                consume(TK_RPAREN, ")");
+                return node;
+            }
+            current = start_token;
+        }
+
+        // --- MODULE 'time' ---
+        else if (strcmp(module_name, "time") == 0) {
+            advance();
+            if (match(TK_PERIOD) && match(TK_IDENT)) {
+                const char* cmd = previous.value.str_val;
+                if (strcmp(cmd, "now") == 0) {
+                    consume(TK_LPAREN, "("); consume(TK_RPAREN, ")");
+                    return newNode(NODE_TIME_NOW);
+                }
+                if (strcmp(cmd, "sleep") == 0) {
+                    ASTNode* node = newNode(NODE_TIME_SLEEP);
+                    consume(TK_LPAREN, "("); node->left = expression(); consume(TK_RPAREN, ")");
+                    // C'est une instruction, mais peut être utilisée en expression (retourne void/0)
+                    return node;
+                }
+            }
+            current = start_token;
+        }
                     key = str_copy(previous.value.str_val);
                 } else {
                     error("Expected string or identifier as object key");
