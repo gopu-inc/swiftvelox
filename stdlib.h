@@ -20,4 +20,19 @@ void std_time_sleep(double seconds);
 char* std_b64_encode(const char* data);
 char* std_b64_decode(const char* data);
 
+// Env
+char* std_env_get(const char* key);
+void std_env_set(const char* key, const char* value);
+char* std_env_os(void);
+
+// Path
+char* std_path_basename(const char* path);
+char* std_path_dirname(const char* path);
+char* std_path_join(const char* p1, const char* p2);
+char* std_path_abs(const char* path);
+
+// String Extensions
+char* std_str_trim(const char* s);
+int std_str_contains(const char* haystack, const char* needle);
+
 #endif
